@@ -27,3 +27,12 @@ def test_timeout():
 def test_parse_result_uses_last_marker_and_wraps_scalars():
     assert parse_result("RESULT_JSON: {\"a\": 1}\nRESULT_JSON: 5") == {"value": 5}
     assert parse_result("nothing") is None
+
+
+def test_non_ascii_output_round_trips():
+    # Models like to print "≈", "µ" or "→"; on Windows the default cp1252 stdout crashed on these.
+    code = "import json\nprint('C ≈ 9967 bit/s, µ → ∞')\nprint('RESULT_JSON: ' + json.dumps({'note': '≈'}, ensure_ascii=False))\n"
+    r = run_python(code, timeout=30)
+    assert r.ok, r.stderr
+    assert "C ≈ 9967 bit/s, µ → ∞" in r.stdout
+    assert r.result == {"note": "≈"}

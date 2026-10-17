@@ -60,25 +60,31 @@ def run_python(code: str, timeout: float = 60) -> RunResult:
         script.write_text(code, encoding="utf-8")
         env = {
             "PATH": os.environ.get("PATH", ""),
-            "PYTHONIOENCODING": "utf-8",
             "MPLBACKEND": "Agg",
             # One BLAS thread keeps virtual memory well under the address-space limit.
             "OPENBLAS_NUM_THREADS": "1",
             "OMP_NUM_THREADS": "1",
             "MKL_NUM_THREADS": "1",
         }
+        # Windows needs these for os.urandom, temp files and numpy's DLL loading.
+        for name in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP"):
+            if name in os.environ:
+                env[name] = os.environ[name]
         try:
             proc = subprocess.run(
-                [sys.executable, "-I", str(script)],
+                # -I ignores PYTHON* env vars (so PYTHONIOENCODING would be dropped); -X utf8
+                # forces UTF-8 stdio, otherwise Windows uses cp1252 and print("≈") crashes.
+                [sys.executable, "-I", "-X", "utf8", str(script)],
                 cwd=tmp,
                 env=env,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 preexec_fn=_limit_resources if os.name == "posix" else None,
             )
         except subprocess.TimeoutExpired as e:
-            out = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+            out = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
             return RunResult(False, out[-MAX_OUTPUT_CHARS:], "", None, timed_out=True)
     stdout = proc.stdout[-MAX_OUTPUT_CHARS:]
     stderr = proc.stderr[-MAX_OUTPUT_CHARS:]
