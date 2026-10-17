@@ -7,6 +7,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
+from typing import Callable
 
 import httpx
 
@@ -14,6 +15,9 @@ log = logging.getLogger(__name__)
 
 ARXIV_URL = "https://export.arxiv.org/api/query"
 S2_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+S2_MIN_INTERVAL = 1.1  # seconds; API keys are limited to 1 request/s
+S2_MAX_ATTEMPTS = 4
+S2_MAX_RETRY_AFTER = 30.0
 _ATOM = {"a": "http://www.w3.org/2005/Atom"}
 
 
@@ -67,6 +71,14 @@ def parse_semantic_scholar(data: dict) -> list[Paper]:
     return [p for p in papers if p.title]
 
 
+def _retry_after(resp: httpx.Response, default: float) -> float:
+    """Seconds to wait from a Retry-After header (capped), else `default`."""
+    try:
+        return min(float(resp.headers["retry-after"]), S2_MAX_RETRY_AFTER)
+    except (KeyError, ValueError):
+        return default
+
+
 _STOPWORDS = {"a", "an", "and", "the", "of", "for", "in", "on", "to", "with", "by", "or", "via", "using"}
 
 
@@ -84,10 +96,16 @@ class LiteratureSearch:
         max_results: int = 5,
         s2_api_key: str | None = None,
         client: httpx.Client | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self.max_results = max_results
         self.s2_api_key = s2_api_key
         self.client = client or httpx.Client(timeout=30, follow_redirects=True)
+        self.sleep = sleep
+        self.clock = clock
+        self._s2_last_call: float | None = None
+        self._s2_rate_limited = False
 
     def arxiv(self, query: str) -> list[Paper]:
         # arXiv ORs bare words ("all:a b c" matches any of them), which floods results with
@@ -119,19 +137,40 @@ class LiteratureSearch:
             "limit": self.max_results,
             "fields": "title,abstract,year,url,citationCount",
         }
+        if self._s2_rate_limited:
+            return []
         headers = {"x-api-key": self.s2_api_key} if self.s2_api_key else {}
-        for attempt in range(3):
+        for attempt in range(S2_MAX_ATTEMPTS):
+            self._s2_throttle()
             try:
                 resp = self.client.get(S2_URL, params=params, headers=headers)
-                if resp.status_code == 429 and attempt < 2:  # unauthenticated limit is tight
-                    time.sleep(2 ** (attempt + 1))
-                    continue
+                if resp.status_code == 429:
+                    if attempt < S2_MAX_ATTEMPTS - 1:
+                        self.sleep(_retry_after(resp, default=2 ** (attempt + 1)))
+                        continue
+                    # Without a key all users share one pool; further queries in this run would
+                    # only burn more waiting time, so stop asking Semantic Scholar for this search.
+                    self._s2_rate_limited = True
+                    log.warning(
+                        "Semantic Scholar rate limit reached; skipping it for the remaining queries. "
+                        "A free API key (S2_API_KEY, or the Semantic Scholar key in Pandora's settings) "
+                        "raises the limit: https://www.semanticscholar.org/product/api#api-key"
+                    )
+                    return []
                 resp.raise_for_status()
                 return parse_semantic_scholar(resp.json())
             except (httpx.HTTPError, ValueError) as e:
                 log.warning("Semantic Scholar search failed for %r: %s", query, e)
                 return []
         return []
+
+    def _s2_throttle(self) -> None:
+        """Keep at least S2_MIN_INTERVAL seconds between Semantic Scholar requests."""
+        if self._s2_last_call is not None:
+            wait = S2_MIN_INTERVAL - (self.clock() - self._s2_last_call)
+            if wait > 0:
+                self.sleep(wait)
+        self._s2_last_call = self.clock()
 
     def search(self, queries: list[str]) -> list[Paper]:
         """Search both sources for every query; de-duplicate by normalized title."""

@@ -81,3 +81,52 @@ def test_arxiv_falls_back_to_loose_query_when_strict_finds_nothing():
     papers = LiteratureSearch(client=_client(handler)).arxiv("oam capacity")
     assert queries == ["all:oam AND all:capacity", "all:oam capacity"]
     assert len(papers) == 1
+
+
+class FakeTime:
+    def __init__(self):
+        self.now = 100.0
+        self.sleeps = []
+
+    def sleep(self, seconds):
+        self.sleeps.append(round(seconds, 2))
+        self.now += seconds
+
+    def clock(self):
+        return self.now
+
+
+def _s2_search(handler, t):
+    return LiteratureSearch(client=_client(handler), sleep=t.sleep, clock=t.clock)
+
+
+def test_s2_retries_429_honouring_retry_after():
+    t = FakeTime()
+    replies = iter([httpx.Response(429, headers={"retry-after": "5"}), httpx.Response(200, json=S2_JSON)])
+    papers = _s2_search(lambda r: next(replies), t).semantic_scholar("q")
+    assert len(papers) == 2
+    assert 5.0 in t.sleeps
+
+
+def test_s2_persistent_429_stops_querying_for_rest_of_search():
+    t = FakeTime()
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(429)
+
+    search = _s2_search(handler, t)
+    assert search.semantic_scholar("first") == []
+    n = len(calls)
+    assert n == 4  # S2_MAX_ATTEMPTS
+    assert search.semantic_scholar("second") == []
+    assert len(calls) == n  # no further requests once rate limited
+
+
+def test_s2_requests_are_spaced_out():
+    t = FakeTime()
+    search = _s2_search(lambda r: httpx.Response(200, json={"data": []}), t)
+    search.semantic_scholar("a")
+    search.semantic_scholar("b")
+    assert t.sleeps == [1.1]
