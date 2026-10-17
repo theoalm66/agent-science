@@ -60,3 +60,24 @@ def test_s2_api_key_header_sent():
 
     LiteratureSearch(s2_api_key="secret", client=_client(handler)).semantic_scholar("q")
     assert seen["key"] == "secret"
+
+
+def test_arxiv_query_requires_all_terms():
+    from science_agent.tools.literature import arxiv_query
+
+    assert arxiv_query("Capacity of OAM multiplexing") == "all:capacity AND all:oam AND all:multiplexing"
+    assert arxiv_query("the of") == "all:the of"
+
+
+def test_arxiv_falls_back_to_loose_query_when_strict_finds_nothing():
+    queries = []
+
+    def handler(request):
+        q = request.url.params["search_query"]
+        queries.append(q)
+        empty = '<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+        return httpx.Response(200, text=empty if " AND " in q else ARXIV_XML)
+
+    papers = LiteratureSearch(client=_client(handler)).arxiv("oam capacity")
+    assert queries == ["all:oam AND all:capacity", "all:oam capacity"]
+    assert len(papers) == 1

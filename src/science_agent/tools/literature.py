@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
@@ -66,6 +67,17 @@ def parse_semantic_scholar(data: dict) -> list[Paper]:
     return [p for p in papers if p.title]
 
 
+_STOPWORDS = {"a", "an", "and", "the", "of", "for", "in", "on", "to", "with", "by", "or", "via", "using"}
+
+
+def arxiv_query(query: str) -> str:
+    """Turn free text into an arXiv query that requires every meaningful term."""
+    terms = [t for t in re.findall(r"[\w\-]+", query.lower()) if t not in _STOPWORDS]
+    if not terms:
+        return f"all:{query}"
+    return " AND ".join(f"all:{t}" for t in terms)
+
+
 class LiteratureSearch:
     def __init__(
         self,
@@ -78,8 +90,17 @@ class LiteratureSearch:
         self.client = client or httpx.Client(timeout=30, follow_redirects=True)
 
     def arxiv(self, query: str) -> list[Paper]:
+        # arXiv ORs bare words ("all:a b c" matches any of them), which floods results with
+        # off-topic papers. Require every term; fall back to the loose query if that finds nothing.
+        strict = arxiv_query(query)
+        papers = self._arxiv_request(strict, query)
+        if not papers and strict != f"all:{query}":
+            papers = self._arxiv_request(f"all:{query}", query)
+        return papers
+
+    def _arxiv_request(self, search_query: str, query: str) -> list[Paper]:
         params = {
-            "search_query": f"all:{query}",
+            "search_query": search_query,
             "start": 0,
             "max_results": self.max_results,
             "sortBy": "relevance",
