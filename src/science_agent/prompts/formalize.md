@@ -8,13 +8,16 @@ $idea
 DOMAIN KNOWLEDGE BASE (limits that may apply):
 $knowledge_index
 
-Rules:
-- If the idea has gaps or ambiguities, choose the most standard textbook interpretation, state it
-  in "assumptions", and continue. List the open points in "clarifying_questions" anyway.
-- Set "underspecified" to true ONLY when no testable claim can be formed under any reasonable
-  interpretation (e.g. "what about higher dimensions?" with nothing asserted). A claim with concrete
-  numbers is never underspecified: if the numbers look wrong or inconsistent, that is a finding for
-  the later stages to check, not a reason to stop.
+Rules (research mode: open to new results, but always state the established view):
+- Never resolve an ambiguity by silently assuming the textbook setup. The author's setup or
+  measurement may deliberately differ from it, and that difference may be the whole point.
+- If an ambiguity changes how the claim has to be tested, set "underspecified" to true and ask
+  about it in "clarifying_questions". Minor gaps that do not change the test: ask, but continue.
+- Always fill "established_view": what established theory predicts for this situation under its
+  standard assumptions, with numbers where you can compute them. This is the reference point, not a
+  judgement of the idea.
+- Always fill "what_must_be_true": if the idea or measurement is correct, which standard
+  assumptions must fail or which effect must exist. This is where something new would be found.
 - Search queries name concepts, not parameter values: "AWGN channel capacity bound", not
   "capacity at 30 dB SNR for 1 MHz".
 
@@ -28,5 +31,7 @@ Return JSON:
   "standard_terms": ["established technical names for this or closely related concepts"],
   "search_queries": ["3 to 5 short literature search queries using standard terminology"],
   "underspecified": <true or false>,
-  "clarifying_questions": ["open points the author should clarify; fill this even when not underspecified"]
+  "clarifying_questions": ["open points the author should clarify; fill this even when not underspecified"],
+  "established_view": "what standard theory predicts here, with numbers, under its usual assumptions",
+  "what_must_be_true": ["standard assumptions that must fail, or effects that must exist, if the idea is correct"]
 }

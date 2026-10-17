@@ -176,12 +176,21 @@ class Pipeline:
         ))
         f = a.formalization
         if f.underspecified:
+            # Stop instead of guessing the author's setup, but still give the established view
+            # as a reference point and say what would have to hold if the idea is right.
+            parts = ["Open questions:\n" + "\n".join(f"- {q}" for q in f.clarifying_questions)]
+            if f.established_view:
+                parts.append(f"Established view (reference, not a judgement):\n{f.established_view}")
+            if f.what_must_be_true:
+                parts.append(
+                    "If the idea is correct, then:\n" + "\n".join(f"- {x}" for x in f.what_must_be_true)
+                )
             a.verdict = VerdictResult(
                 verdict="underspecified",
                 confidence=1.0,
-                deciding_argument="The idea cannot be assessed as stated.",
-                next_step="Answer the clarifying questions, then re-run.",
-                summary="Open questions:\n" + "\n".join(f"- {q}" for q in f.clarifying_questions),
+                deciding_argument="Open points change how the claim must be tested; answer them before it is assessed.",
+                next_step="Answer the clarifying questions, add them to the idea, then re-run.",
+                summary="\n\n".join(parts),
             )
             return a
 

@@ -30,6 +30,8 @@ class Formalization(BaseModel):
     search_queries: list[str] = Field(default_factory=list)
     underspecified: bool = False
     clarifying_questions: list[str] = Field(default_factory=list)
+    established_view: str = ""
+    what_must_be_true: list[str] = Field(default_factory=list)
 
 
 class PriorWork(BaseModel):

@@ -21,8 +21,10 @@ Read `src/science_agent/prompts/system.md` first and hold yourself to its rules 
 For each stage, read the matching prompt file in `src/science_agent/prompts/` and produce the JSON
 it asks for (keep it in your working notes; you don't need to show the JSON to the user).
 
-1. **Formalize** (`formalize.md`): restate the idea as a precise claim. If it is underspecified,
-   stop and ask the user the clarifying questions instead of guessing.
+1. **Formalize** (`formalize.md`): restate the idea as a precise claim. Never swap the author's
+   setup for the textbook one. If it is underspecified, stop and ask the user the clarifying
+   questions, but still state the established view and what would have to be true if the idea
+   is correct.
 
 2. **Literature** (`literature.md`): delegate to the `literature-scout` subagent with the claim,
    standard terms and search queries. It returns established field, novelty and closest prior work

@@ -46,11 +46,17 @@ def test_stage_fails_after_repeated_invalid_output(offline_config):
 
 def test_underspecified_idea_stops_early(offline_config):
     llm = ScriptedLLM({"formalize": {**CANNED["formalize"], "underspecified": True,
-                                     "clarifying_questions": ["Which channel?"]}})
+                                     "clarifying_questions": ["Which channel?"],
+                                     "established_view": "AWGN capacity is 9.97 Mbit/s here.",
+                                     "what_must_be_true": ["The noise is not Gaussian"]}})
     a = Pipeline(offline_config, llms={s: llm for s in STAGES}).run("higher dimensions?")
     assert a.verdict.verdict == "underspecified"
     assert [s for s, _ in llm.calls] == ["formalize"]
-    assert "Which channel?" in render_markdown(a)
+    # Stops to ask, but still reports the established view and what would have to hold.
+    for text in (a.verdict.summary, render_markdown(a)):
+        assert "Which channel?" in text
+        assert "AWGN capacity is 9.97 Mbit/s here." in text
+        assert "The noise is not Gaussian" in text
 
 
 def test_failed_script_is_retried_with_error(offline_config, scripted):

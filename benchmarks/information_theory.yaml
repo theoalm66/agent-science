@@ -25,10 +25,11 @@ ideas:
     idea: >
       Our receiver reaches 15.97 Mbit/s error-free over a single-antenna AWGN link with
       1 MHz bandwidth at an SNR of 30 dB.
-    acceptable: [wrong]
+    acceptable: [underspecified, wrong]
     why: >
-      C = 1e6 * log2(1001) ~= 9.97 Mbit/s. A concrete numeric claim must be checked, not
-      sent back as underspecified.
+      Under standard AWGN assumptions C = 1e6 * log2(1001) ~= 9.97 Mbit/s. Asking how the rate
+      was measured is legitimate (research mode); judging it wrong against the stated setup is too.
+      Calling it known or promising is not.
 
   - id: feedback_capacity
     idea: >

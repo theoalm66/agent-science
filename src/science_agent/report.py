@@ -47,6 +47,10 @@ def render_markdown(a: Assessment) -> str:
             out.append(f"**Variables:**\n{_bullets(f.variables)}\n")
         if f.clarifying_questions:
             out.append(f"**Clarifying questions:**\n{_bullets(f.clarifying_questions)}\n")
+        if f.established_view:
+            out.append(f"**Established view (reference, not a judgement):** {f.established_view}\n")
+        if f.what_must_be_true:
+            out.append(f"**If the idea is correct, then:**\n{_bullets(f.what_must_be_true)}\n")
 
     if a.literature:
         lit = a.literature

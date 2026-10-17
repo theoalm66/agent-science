@@ -865,7 +865,9 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       if(p.claim) h.push("<div>"+esc(p.claim)+"</div>");
       if(p.predicted_quantity) h.push('<div><span class="dim">Predicted quantity:</span> '+esc(p.predicted_quantity)+"</div>");
       if(p.assumptions && p.assumptions.length) h.push('<div class="dim">Assumptions:</div>'+list(p.assumptions.map(esc)));
-      if(p.underspecified && p.clarifying_questions) h.push('<div class="dim">Clarifying questions:</div>'+list(p.clarifying_questions.map(esc)));
+      if(p.clarifying_questions && p.clarifying_questions.length) h.push('<div class="dim">Clarifying questions:</div>'+list(p.clarifying_questions.map(esc)));
+      if(p.established_view) h.push('<div><span class="dim">Established view (reference, not a judgement):</span> '+esc(p.established_view)+"</div>");
+      if(p.what_must_be_true && p.what_must_be_true.length) h.push('<div class="dim">If the idea is correct, then:</div>'+list(p.what_must_be_true.map(esc)));
     } else if(name === "literature"){
       if(p.novelty || p.established_field) h.push('<div><span class="tag">'+esc(p.novelty || "?")+"</span> "+esc(p.established_field || "")+"</div>");
       if(p.summary) h.push('<div class="dim">'+esc(p.summary)+"</div>");
