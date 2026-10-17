@@ -67,6 +67,7 @@ class Assessment:
     verdict: VerdictResult | None = None
     models: dict[str, str] = field(default_factory=dict)
     seconds: dict[str, float] = field(default_factory=dict)
+    meta: dict = field(default_factory=dict)  # free-form run metadata, e.g. settings and prompt versions
 
     def to_dict(self) -> dict:
         def dump(m):
@@ -85,6 +86,7 @@ class Assessment:
             "verdict": dump(self.verdict),
             "models": self.models,
             "seconds": self.seconds,
+            "meta": self.meta,
         }
 
 
@@ -96,11 +98,14 @@ class Pipeline:
         literature: LiteratureSearch | None = None,
         sandbox: Callable[[str, float], RunResult] = run_python,
         progress: Callable[[str], None] | None = None,
+        prompts: dict[str, str] | None = None,
     ):
         self.config = config
         self.llms = llms or self._build_llms(config)
         self.domain = knowledge.load_domain(config.domain)
-        self.system_prompt = load_prompt("system")
+        # Prompt texts fixed for this run; stages not given here are read from the package.
+        self.prompts = dict(prompts or {})
+        self.system_prompt = self.prompt("system")
         self.sandbox = sandbox
         self.progress = progress or (lambda msg: None)
         if literature is None and config.literature.enabled:
@@ -126,9 +131,12 @@ class Pipeline:
 
     # -- core helper -------------------------------------------------------
 
+    def prompt(self, name: str) -> str:
+        return self.prompts.get(name) or load_prompt(name)
+
     def ask(self, stage: str, model_cls: type[M], max_attempts: int = 2, **variables) -> M:
         """Render the stage prompt, call the LLM, parse and validate JSON; retry once on bad output."""
-        prompt = Template(load_prompt(stage)).safe_substitute(
+        prompt = Template(self.prompt(stage)).safe_substitute(
             {k: v if isinstance(v, str) else json.dumps(v, ensure_ascii=False) for k, v in variables.items()}
         )
         llm = self.llms[stage]

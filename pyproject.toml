@@ -23,12 +23,13 @@ dev = ["pytest>=8"]
 
 [project.scripts]
 science-agent = "science_agent.cli:main"
+pandora = "science_agent.web:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-science_agent = ["prompts/*.md", "knowledge/*.yaml"]
+science_agent = ["prompts/*.md", "knowledge/*.yaml", "static/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

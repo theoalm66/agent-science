@@ -17,6 +17,8 @@ class LLMConfig(BaseModel):
     base_url: str | None = "http://localhost:11434/v1"
     model: str = "qwen3:32b"
     api_key_env: str | None = None
+    # A literal key, used by the web UI so keys typed there never touch disk. Takes precedence.
+    api_key_value: str | None = Field(default=None, repr=False)
     temperature: float = 0.2
     max_tokens: int = 8192
     timeout: float = 600
@@ -24,6 +26,8 @@ class LLMConfig(BaseModel):
     effort: str | None = "high"  # anthropic only
 
     def api_key(self) -> str | None:
+        if self.api_key_value:
+            return self.api_key_value
         return os.environ.get(self.api_key_env) if self.api_key_env else None
 
 

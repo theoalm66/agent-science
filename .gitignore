@@ -5,3 +5,4 @@ __pycache__/
 reports/*
 !reports/.gitkeep
 config.yaml
+pandora-data/

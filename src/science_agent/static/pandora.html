@@ -1,0 +1,1543 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pandora · Science Agent</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+html,body{margin:0}
+[hidden]{display:none!important}
+/* layout: top bar (ident/status) -> settings panel -> library rack (left) + workspace (right) -> bottom agent trace */
+:root{
+  --bg:#f3f4f6; --panel:#ffffff; --panel-2:#eceef1; --line:#d9dce1;
+  --fg:#15181d; --fg-dim:#5c6672;
+  --accent:#b5790a; --accent-ink:#fff8ea;
+  --c-create:#b5790a; --c-plan:#2458b3; --c-analyze:#157a6e; --c-guard:#a6305a; --c-neutral:#5c6672;
+  --live:#c23b2e; --good:#1f8f66; --danger:#c23b2e;
+  --font-display:'Fraunces', 'Iowan Old Style', serif;
+  --font-body:'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono:'JetBrains Mono', ui-monospace, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#11151b; --panel:#171c24; --panel-2:#1e2430; --line:#2b323e;
+    --fg:#edf0f4; --fg-dim:#9aa5b3;
+    --accent:#e2a63d; --accent-ink:#1c1304;
+    --c-create:#e2a63d; --c-plan:#6ea0ff; --c-analyze:#4bc7b4; --c-guard:#e573a0; --c-neutral:#9aa5b3;
+    --live:#ff6b5b; --good:#4fd49b; --danger:#ff6b5b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#11151b; --panel:#171c24; --panel-2:#1e2430; --line:#2b323e;
+  --fg:#edf0f4; --fg-dim:#9aa5b3;
+  --accent:#e2a63d; --accent-ink:#1c1304;
+  --c-create:#e2a63d; --c-plan:#6ea0ff; --c-analyze:#4bc7b4; --c-guard:#e573a0; --c-neutral:#9aa5b3;
+  --live:#ff6b5b; --good:#4fd49b; --danger:#ff6b5b;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);padding-inline:16px}
+.app{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:14px;padding-block:18px 28px}
+h1,h2,h3,h4{font-family:var(--font-display);font-weight:600;text-wrap:balance;margin:0}
+a{color:var(--c-plan)}
+button{font-family:var(--font-body);cursor:pointer}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px}
+.brand h1{font-size:1.5rem;letter-spacing:.2px}
+.brand-sub{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-dim);letter-spacing:.06em;text-transform:uppercase}
+.tally-dot{width:11px;height:11px;border-radius:50%;background:var(--fg-dim);box-shadow:0 0 0 3px color-mix(in srgb, var(--fg-dim) 20%, transparent);transition:background .2s,box-shadow .2s}
+.tally-dot.ok{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent)}
+.tally-dot.live{background:var(--live);box-shadow:0 0 0 4px color-mix(in srgb, var(--live) 30%, transparent);animation:pulse 1.1s ease-in-out infinite}
+.tally-dot.err{background:var(--danger)}
+@media (prefers-reduced-motion: reduce){.tally-dot.live{animation:none}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.topbar-actions{display:flex;align-items:center;gap:10px}
+.status-text{font-family:var(--font-mono);font-size:.78rem;color:var(--fg-dim);max-width:52ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.icon-btn{height:38px;min-width:38px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font-size:1rem;display:flex;align-items:center;justify-content:center}
+.icon-btn.text{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.04em}
+.icon-btn:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--c-plan);outline-offset:2px}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+.settings{padding:16px;display:flex;flex-direction:column;gap:14px}
+.settings h2{font-size:1rem}
+.preset-row{display:flex;gap:8px;flex-wrap:wrap}
+.preset-btn{border:1px solid var(--line);background:var(--panel-2);color:var(--fg);border-radius:999px;padding:7px 14px;font-size:.82rem}
+.preset-btn.active{border-color:var(--accent);color:var(--accent)}
+.field-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.field-grid.tight{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.field label,.field .label{display:block;font-size:.76rem;color:var(--fg-dim);margin-bottom:4px;font-family:var(--font-mono)}
+.field input,.field select{width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg);font-size:.9rem;min-width:0}
+.field textarea{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg);font-size:.95rem;font-family:var(--font-body);min-height:110px;resize:vertical;min-width:0;line-height:1.5}
+.check{display:flex;align-items:center;gap:8px;font-size:.86rem;color:var(--fg)}
+.check input{width:auto;margin:0}
+.key-wrap{display:flex;gap:6px}
+.key-wrap input{flex:1}
+.key-wrap button{border:1px solid var(--line);background:var(--panel-2);color:var(--fg-dim);border-radius:8px;padding:0 10px;font-family:var(--font-mono);font-size:.7rem}
+.hint{font-size:.78rem;color:var(--fg-dim);line-height:1.5;margin:0}
+.info-banner{display:flex;align-items:flex-start;gap:9px;background:color-mix(in srgb, var(--c-plan) 10%, var(--panel-2));border:1px solid color-mix(in srgb, var(--c-plan) 35%, var(--line));border-radius:10px;padding:10px 12px;font-size:.82rem;color:var(--fg);line-height:1.5}
+.info-banner .i{flex-shrink:0;width:18px;height:18px;border-radius:50%;background:var(--c-plan);color:var(--panel);font-family:var(--font-display);font-style:italic;font-weight:600;font-size:.76rem;display:flex;align-items:center;justify-content:center;line-height:1}
+.info-banner.warn{background:color-mix(in srgb, var(--accent) 10%, var(--panel-2));border-color:color-mix(in srgb, var(--accent) 40%, var(--line))}
+.info-banner.warn .i{background:var(--accent)}
+.settings-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.btn{border:none;border-radius:9px;padding:10px 16px;font-size:.88rem;font-weight:500;background:var(--accent);color:var(--accent-ink)}
+.btn.secondary{background:var(--panel-2);color:var(--fg);border:1px solid var(--line)}
+.btn.small{padding:6px 12px;font-size:.78rem}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.save-note{font-size:.76rem;color:var(--good);font-family:var(--font-mono)}
+.save-note.bad{color:var(--danger)}
+code,.mono{font-family:var(--font-mono);font-size:.84em}
+
+.layout{display:grid;grid-template-columns:290px minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:820px){.layout{grid-template-columns:1fr}}
+.skills{padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0;max-height:calc(100vh - 120px);overflow-y:auto;position:sticky;top:12px}
+@media (max-width:820px){.skills{position:static;max-height:none}}
+.skills h2{font-size:.85rem;color:var(--fg-dim);font-family:var(--font-mono);letter-spacing:.06em;text-transform:uppercase}
+.skill-grid{display:grid;grid-template-columns:1fr;gap:6px}
+.skill-group{display:flex;flex-direction:column;gap:6px}
+.skill-group-header{display:flex;align-items:center;gap:6px;background:none;border:none;padding:6px 2px 2px;width:100%;color:var(--cat,var(--fg-dim))}
+.skill-group-header .twisty{font-family:var(--font-mono);width:14px;flex-shrink:0;text-align:center}
+.skill-group-header .label{font-family:var(--font-mono);font-size:.66rem;letter-spacing:.07em;text-transform:uppercase}
+.skill-group-header .count{font-family:var(--font-mono);font-size:.66rem;color:var(--fg-dim);margin-left:auto}
+.skill-card{display:flex;align-items:center;gap:10px;text-align:left;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;color:var(--fg);width:100%}
+.skill-card.active{border-color:var(--cat,var(--accent));box-shadow:inset 3px 0 0 var(--cat,var(--accent))}
+.channel-badge{font-family:var(--font-mono);font-size:.68rem;font-weight:500;letter-spacing:.04em;color:var(--cat,var(--fg-dim));border:1px solid var(--cat,var(--line));border-radius:6px;padding:3px 6px;flex-shrink:0;min-width:38px;text-align:center}
+.skill-name{font-size:.86rem;line-height:1.25;min-width:0;overflow-wrap:anywhere}
+.skill-sub{display:block;font-size:.72rem;color:var(--fg-dim);margin-top:1px}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--live);margin-left:auto;flex-shrink:0;animation:pulse 1.1s ease-in-out infinite}
+.more-btn{border:1px dashed var(--line);background:none;color:var(--fg-dim);border-radius:10px;padding:7px 10px;font-size:.78rem;text-align:left}
+
+.workspace{padding:18px;min-width:0;display:flex;flex-direction:column;gap:14px}
+.ws-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ws-head h3{font-size:1.25rem}
+.ws-cat{font-family:var(--font-mono);font-size:.72rem;color:var(--cat);border:1px solid var(--cat);border-radius:999px;padding:2px 10px}
+.ws-file{font-family:var(--font-mono);font-size:.72rem;color:var(--fg-dim);border:1px solid var(--line);border-radius:999px;padding:2px 10px}
+.ws-desc{color:var(--fg-dim);font-size:.9rem;margin:-4px 0 0;line-height:1.55}
+.ws-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-family:var(--font-mono);font-size:.74rem;border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:3px 10px;color:var(--fg)}
+.chip.var{color:var(--c-plan);border-color:color-mix(in srgb, var(--c-plan) 45%, var(--line))}
+.var-table{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:.84rem;align-items:baseline}
+.var-table .k{font-family:var(--font-mono);color:var(--c-plan);font-size:.8rem}
+.var-table .v{color:var(--fg-dim)}
+pre.prompt{margin:0;white-space:pre-wrap;word-break:break-word;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:14px;font-family:var(--font-mono);font-size:.82rem;line-height:1.6;max-height:62vh;overflow:auto}
+pre.prompt .v{color:var(--c-plan);background:color-mix(in srgb, var(--c-plan) 12%, transparent);border-radius:4px;padding:0 3px}
+pre.prompt .h{color:var(--accent);font-weight:500}
+.filter-input{width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg);font-size:.86rem}
+
+.flow-steps{display:flex;flex-direction:column;gap:8px}
+.flow-step{border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.flow-step.pending,.flow-step.skipped{opacity:.55}
+.flow-step.current{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.flow-step.done{border-color:color-mix(in srgb, var(--good) 60%, var(--line))}
+.flow-step.error,.flow-step.cancelled{border-color:var(--danger)}
+.flow-step-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.flow-step-head .num{font-family:var(--font-mono);font-size:.74rem;color:var(--fg-dim);border:1px solid var(--line);border-radius:999px;width:22px;height:22px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.flow-step.done .num{background:var(--good);color:var(--panel);border-color:var(--good)}
+.flow-step.current .num{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.flow-step-head strong{font-weight:500;font-size:.92rem}
+.flow-step-status{font-family:var(--font-mono);font-size:.7rem;color:var(--fg-dim);margin-left:auto}
+.stage-body{font-size:.86rem;line-height:1.55;color:var(--fg);padding-left:30px;display:flex;flex-direction:column;gap:4px}
+.stage-body ul{margin:0;padding-left:1.1em}
+.stage-body .dim{color:var(--fg-dim)}
+.tag{display:inline-block;font-family:var(--font-mono);font-size:.7rem;border:1px solid currentColor;border-radius:6px;padding:1px 6px;margin-right:4px}
+.tag.fatal{color:var(--danger)} .tag.major{color:var(--accent)} .tag.minor{color:var(--fg-dim)}
+.tag.yes{color:var(--danger)} .tag.no{color:var(--good)}
+
+.verdict-card{border:1px solid var(--v);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;background:color-mix(in srgb, var(--v) 7%, var(--panel))}
+.verdict-top{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.verdict-label{font-family:var(--font-display);font-size:1.6rem;color:var(--v);font-weight:600}
+.verdict-desc{color:var(--fg-dim);font-size:.88rem}
+.meter{display:flex;align-items:center;gap:10px;font-family:var(--font-mono);font-size:.78rem;color:var(--fg-dim)}
+.meter .bar{flex:0 0 180px;height:7px;border-radius:99px;background:var(--panel-2);overflow:hidden;border:1px solid var(--line)}
+.meter .bar span{display:block;height:100%;background:var(--v)}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;font-size:.9rem;line-height:1.5}
+.kv .k{font-family:var(--font-mono);font-size:.74rem;color:var(--fg-dim);padding-top:3px}
+@media (max-width:640px){.kv{grid-template-columns:1fr}}
+.error-box{border:1px solid var(--danger);color:var(--danger);border-radius:10px;padding:10px 12px;font-family:var(--font-mono);font-size:.82rem;white-space:pre-wrap;word-break:break-word}
+.empty{color:var(--fg-dim);font-size:.86rem;font-family:var(--font-mono)}
+
+.limit-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--panel-2)}
+.limit-card h4{font-size:1rem}
+.limit-card .formula{font-family:var(--font-mono);font-size:.8rem;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 8px;align-self:flex-start}
+.limit-card .sec{font-family:var(--font-mono);font-size:.68rem;color:var(--fg-dim);letter-spacing:.06em;text-transform:uppercase;margin-top:4px}
+.limit-card ul{margin:0;padding-left:1.1em;font-size:.86rem;line-height:1.5}
+.limit-card p{margin:0;font-size:.88rem;line-height:1.55}
+
+.md{font-size:.92rem;line-height:1.6;min-width:0}
+.md h2{font-size:1.3rem;margin:4px 0 8px}
+.md h3{font-size:1.08rem;margin:18px 0 6px}
+.md h4,.md h5,.md h6{font-size:.98rem;margin:14px 0 6px}
+.md p{margin:0 0 10px}
+.md ul,.md ol{margin:0 0 10px;padding-left:1.3em}
+.md blockquote{margin:0 0 10px;padding:6px 12px;border-left:3px solid var(--accent);background:var(--panel-2);border-radius:0 8px 8px 0}
+.md pre{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;overflow:auto;font-size:.8rem;line-height:1.5}
+.md code{background:var(--panel-2);border-radius:4px;padding:0 4px}
+.md pre code{background:none;padding:0}
+.md details{border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:0 0 10px}
+.md summary{cursor:pointer;font-family:var(--font-mono);font-size:.8rem;color:var(--fg-dim)}
+.md hr{border:none;border-top:1px dashed var(--line);margin:16px 0}
+.collapse{border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.collapse > summary{cursor:pointer;font-family:var(--font-mono);font-size:.8rem;color:var(--fg-dim)}
+
+.ver-badge{font-family:var(--font-mono);font-size:.72rem;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:2px 10px}
+.ver-badge.warn{border-color:var(--danger);color:var(--danger)}
+.editor{display:flex;flex-direction:column;gap:10px;background:var(--panel-2);border:1px solid var(--accent);border-radius:12px;padding:12px}
+.editor > label{font-size:.76rem;color:var(--fg-dim);font-family:var(--font-mono)}
+.editor textarea{width:100%;min-height:440px;padding:12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font-family:var(--font-mono);font-size:.82rem;line-height:1.6;resize:vertical;tab-size:2}
+.editor .field input{background:var(--panel)}
+.msgs{display:flex;flex-direction:column;gap:3px;font-size:.8rem;line-height:1.5}
+.msgs .err{color:var(--danger)} .msgs .warn{color:var(--accent)} .msgs .ok{color:var(--good)}
+.preview-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px dashed var(--accent);border-radius:10px;padding:8px 12px;font-size:.84rem}
+.version-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px;font-size:.8rem;max-height:300px;overflow-y:auto}
+.version-list li{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--fg-dim);flex-wrap:wrap}
+.version-list li.current{border-color:var(--accent);color:var(--fg);box-shadow:inset 3px 0 0 var(--accent)}
+.version-list li.clickable{cursor:pointer}
+.version-list li.clickable:hover{border-color:var(--fg-dim)}
+.version-list .vn{font-family:var(--font-mono);color:var(--fg);min-width:2.6em}
+.version-list .vdate{font-family:var(--font-mono);font-size:.74rem}
+.version-list .vnote{flex:1;min-width:140px;color:var(--fg)}
+.version-list .vbtns{display:flex;gap:4px;margin-left:auto}
+.link-btn{background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--fg);font-size:.72rem;padding:3px 8px;font-family:var(--font-mono)}
+.link-btn.danger{color:var(--danger)}
+.link-btn:disabled{opacity:.45;cursor:not-allowed}
+pre.diff{margin:0;white-space:pre-wrap;word-break:break-word;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:10px 0;font-family:var(--font-mono);font-size:.78rem;line-height:1.55;max-height:50vh;overflow:auto}
+pre.diff span{display:block;padding:0 12px}
+pre.diff .add{background:color-mix(in srgb, var(--good) 16%, transparent)}
+pre.diff .add::before{content:"+ ";color:var(--good)}
+pre.diff .del{background:color-mix(in srgb, var(--danger) 14%, transparent)}
+pre.diff .del::before{content:"− ";color:var(--danger)}
+pre.diff .same::before{content:"  "}
+pre.diff .skip{color:var(--fg-dim);font-style:italic}
+.chip-btn{font-family:var(--font-mono);font-size:.74rem;border:1px solid var(--line);background:var(--panel-2);border-radius:999px;padding:3px 10px;color:var(--fg)}
+.chip-btn.changed{border-color:var(--accent);color:var(--accent)}
+.section-title{font-family:var(--font-mono);font-size:.7rem;color:var(--fg-dim);letter-spacing:.07em;text-transform:uppercase;margin:4px 0 -4px}
+
+.trace{padding:14px 16px 16px}
+.trace-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.trace h2{font-size:.85rem;color:var(--fg-dim);font-family:var(--font-mono);letter-spacing:.06em;text-transform:uppercase}
+.trace-legend{font-size:.76rem;color:var(--fg-dim);max-width:70ch;line-height:1.5;margin:0}
+.trace-log{list-style:none;margin:10px 0 0;padding:0;font-family:var(--font-mono);font-size:.8rem;display:flex;flex-direction:column;gap:5px;max-height:320px;overflow-y:auto}
+.trace-log li{display:flex;gap:10px;color:var(--fg-dim);border-left:2px solid var(--line);padding-left:10px;align-items:flex-start}
+.trace-log li .t{flex-shrink:0;opacity:.7}
+.trace-log li .m{min-width:0;flex:1}
+.trace-log li.now{color:var(--fg);border-left-color:var(--accent)}
+.trace-log li.req{border-left-color:var(--c-plan)}
+.trace-log li.res{border-left-color:var(--c-analyze)}
+.trace-log li.err{color:var(--danger);border-left-color:var(--danger)}
+.trace-log details summary{cursor:pointer}
+.trace-log pre{white-space:pre-wrap;word-break:break-word;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px;margin:6px 0 2px;max-height:360px;overflow:auto;color:var(--fg);font-size:.76rem;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="tally-dot" id="statusDot" aria-hidden="true"></span>
+      <h1>Pandora</h1>
+      <span class="brand-sub">science agent</span>
+    </div>
+    <div class="topbar-actions">
+      <span class="status-text" id="statusText">not connected</span>
+      <button class="icon-btn" id="themeBtn" aria-label="Switch theme" title="Theme: auto / light / dark">◐</button>
+      <button class="icon-btn" id="settingsBtn" aria-label="Settings" aria-expanded="false">⚙</button>
+    </div>
+  </header>
+
+  <section class="panel settings" id="settingsPanel" hidden>
+    <h2>LLM connection</h2>
+    <div class="preset-row" id="presetRow"></div>
+    <p class="hint" id="presetHint"></p>
+    <div class="field-grid">
+      <div class="field">
+        <label for="providerInput">Provider</label>
+        <select id="providerInput">
+          <option value="openai_compatible">OpenAI-compatible (vLLM, LM Studio, Ollama, …)</option>
+          <option value="anthropic">Anthropic API</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="baseUrlInput">Endpoint URL (ends in /v1)</label>
+        <input id="baseUrlInput" type="text" placeholder="http://192.168.2.84:8000/v1" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="apiKeyInput">API key (optional for local servers)</label>
+        <div class="key-wrap">
+          <input id="apiKeyInput" type="password" placeholder="Bearer token" autocomplete="off">
+          <button type="button" data-toggle="apiKeyInput">SHOW</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="modelInput">Model</label>
+        <input id="modelInput" list="modelList" placeholder="click “Load models”" autocomplete="off">
+        <datalist id="modelList"></datalist>
+      </div>
+    </div>
+    <div class="field-grid tight">
+      <div class="field"><label for="tempInput">Temperature</label><input id="tempInput" type="number" step="0.1" min="0" max="2"></div>
+      <div class="field"><label for="maxTokInput">Max output tokens</label><input id="maxTokInput" type="number" step="256" min="256"></div>
+      <div class="field"><label for="timeoutInput">Timeout per call (s)</label><input id="timeoutInput" type="number" step="30" min="10"></div>
+      <div class="field" id="effortField"><label for="effortInput">Effort (Anthropic)</label>
+        <select id="effortInput"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select>
+      </div>
+      <div class="field"><span class="label">Output</span><label class="check"><input type="checkbox" id="jsonModeInput"> JSON mode</label></div>
+    </div>
+    <p class="hint" id="modelInfo"></p>
+
+    <h2>Literature search</h2>
+    <div class="field-grid">
+      <div class="field">
+        <label for="s2KeyInput">Semantic Scholar API key (optional)</label>
+        <div class="key-wrap">
+          <input id="s2KeyInput" type="password" placeholder="x-api-key" autocomplete="off">
+          <button type="button" data-toggle="s2KeyInput">SHOW</button>
+        </div>
+      </div>
+    </div>
+    <div class="info-banner">
+      <span class="i" aria-hidden="true">i</span>
+      <span>Without a key Semantic Scholar often answers “429 Too Many Requests” and only arXiv results are used. A free key: <a href="https://www.semanticscholar.org/product/api#api-key-form" target="_blank" rel="noopener">semanticscholar.org/product/api</a></span>
+    </div>
+
+    <div class="settings-actions">
+      <button class="btn secondary" id="loadModelsBtn" type="button">Load models</button>
+      <button class="btn" id="saveSettingsBtn" type="button">Save &amp; connect</button>
+      <button class="btn secondary" id="resetSettingsBtn" type="button">Reset to config.yaml</button>
+      <span class="save-note" id="saveNote" hidden></span>
+    </div>
+    <p class="hint">Settings and keys are stored only in this browser (localStorage). Keys are sent to the local Pandora server with each run, which uses them in memory for the calls to your endpoint and never writes them to disk or to reports. Defaults come from <code id="configPath">config.yaml</code>.</p>
+
+    <h2>Backup &amp; transfer</h2>
+    <p class="hint">Save runs, prompt and skill versions and the connection settings as one JSON file, to keep a backup or move everything to another computer. Importing merges: nothing is overwritten, duplicates are skipped, and imported prompt/skill versions are added to the history without being activated.</p>
+    <div class="preset-row">
+      <label class="check"><input type="checkbox" id="exRuns" checked> runs &amp; reports</label>
+      <label class="check"><input type="checkbox" id="exVersions" checked> prompt &amp; skill versions</label>
+      <label class="check"><input type="checkbox" id="exSettings" checked> connection settings</label>
+      <label class="check"><input type="checkbox" id="exKeys"> include API keys</label>
+    </div>
+    <div class="settings-actions">
+      <button class="btn secondary" id="exportBtn" type="button">Export (JSON)</button>
+      <button class="btn secondary" id="importBtn" type="button">Import file…</button>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+      <span class="save-note" id="importNote" hidden></span>
+    </div>
+    <p class="hint">With “include API keys” the file contains them in plain text. Do not share such a file.</p>
+  </section>
+
+  <main class="layout">
+    <aside class="panel skills">
+      <h2>Library</h2>
+      <div class="skill-grid" id="rack"></div>
+    </aside>
+    <section class="panel workspace" id="workspace"></section>
+  </main>
+
+  <section class="panel trace">
+    <div class="trace-head">
+      <h2>Agent trace</h2>
+      <button class="btn secondary small" id="clearTraceBtn" type="button">Clear</button>
+    </div>
+    <p class="trace-legend">Every model call of the current run, with the exact prompt Pandora sent and the raw reply, plus literature search and the Python sandbox. Click an entry to expand it.</p>
+    <ol class="trace-log" id="traceLog"></ol>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------------------------------------------------------------- constants
+
+  var PRESETS = [
+    { id:"spark", label:"DGX Spark (vLLM)", provider:"openai_compatible", base_url:"http://192.168.2.84:8000/v1",
+      model:"nvidia/Qwen3.6-35B-A3B-NVFP4", json_mode:true,
+      hint:"vLLM in Docker on the ThinkStation PGX (thinkstationpgx-afbe). No key needed unless vLLM was started with --api-key." },
+    { id:"lmstudio", label:"LM Studio (this PC)", provider:"openai_compatible", base_url:"http://localhost:1234/v1",
+      model:"qwen3.6-35b-a3b", json_mode:false,
+      hint:"Start the server in LM Studio's Developer tab. Pandora calls it from its own process, so LM Studio's CORS setting does not matter." },
+    { id:"ollama", label:"Ollama", provider:"openai_compatible", base_url:"http://localhost:11434/v1", model:"", json_mode:false,
+      hint:"Ollama's OpenAI-compatible endpoint. Load models to see what is pulled." },
+    { id:"anthropic", label:"Anthropic API", provider:"anthropic", base_url:"", model:"claude-opus-5-5", json_mode:false,
+      hint:"Needs the optional package once: .venv\\Scripts\\python -m pip install -e \".[anthropic]\". Enter a key from console.anthropic.com or set ANTHROPIC_API_KEY." },
+    { id:"custom", label:"Custom endpoint", hint:"Any OpenAI-compatible URL ending in /v1: OpenRouter, OpenAI, llama.cpp server, a university API, …" }
+  ];
+
+  var STAGE_META = {
+    system:     { code:"SYS", label:"System prompt", sub:"Ground rules for every call",
+                  desc:"Sent as the system message with every stage call. It sets the role (a rigorous first-principles reviewer) and the rules: calibrated, every claim backed by a principle, number or source, and a single JSON object as reply." },
+    formalize:  { code:"FRM", n:1, label:"Formalize", sub:"Idea → precise claim", output:"Formalization",
+                  desc:"Restates the idea as a precise, testable claim with assumptions, variables and the predicted quantity, and writes literature queries in standard terminology. If the idea is too vague, the run stops here with clarifying questions." },
+    literature: { code:"LIT", n:2, label:"Literature", sub:"Field, novelty, prior work", output:"LiteratureAssessment",
+                  desc:"Receives the arXiv and Semantic Scholar results for the queries from stage 1 and decides which established field the idea belongs to, how novel it is and which works come closest." },
+    limits:     { code:"LIM", n:3, label:"Limits", sub:"Check against known limits", output:"LimitsCheck",
+                  desc:"The core check: the claim against every applicable limit in the domain knowledge base. Which assumption of each limit does the idea genuinely relax? It also poses the single most decisive quantitative question." },
+    compute:    { code:"CMP", n:4, label:"Compute", sub:"Write a Python check", output:"ComputePlan",
+                  desc:"Writes a short Python script (numpy, scipy, sympy) that answers the quantitative question. Pandora runs it locally with a time limit and feeds an error back for one retry." },
+    critic:     { code:"CRT", n:5, label:"Critic", sub:"Adversarial review", output:"Critique",
+                  desc:"Attacks the claim and the analysis so far: hidden assumptions, practical vs. fundamental, renamed known techniques, unit errors, mistakes in earlier stages." },
+    verdict:    { code:"VRD", n:6, label:"Verdict", sub:"One calibrated verdict", output:"VerdictResult",
+                  desc:"Weighs all the evidence and picks exactly one verdict with a calibrated confidence, the deciding argument and the cheapest next step." },
+    search:     { code:"SRC", label:"Literature search", sub:"arXiv + Semantic Scholar" }
+  };
+  var FLOW = ["formalize","search","literature","limits","compute","critic","verdict"];
+
+  var VAR_INFO = {
+    idea:"the idea exactly as you typed it",
+    knowledge_index:"one line per limit in the domain knowledge base",
+    claim:"the formalized claim from stage 1",
+    standard_terms:"standard technical terms from stage 1",
+    papers:"arXiv and Semantic Scholar results, up to 15 with abstract excerpts",
+    assumptions:"the assumptions from stage 1",
+    predicted_quantity:"the predicted quantity from stage 1",
+    knowledge:"the full domain knowledge base (YAML)",
+    question:"the quantitative question from stage 3",
+    limits:"compute: names of the applicable limits · critic/verdict: the limits analysis as JSON",
+    previous_error:"empty, or on a retry the failing script and its error",
+    literature:"the literature assessment as JSON",
+    computation:"the script's status, result and output tail",
+    critique:"the critic's objections as JSON"
+  };
+
+  var VERDICT = {
+    wrong:              { label:"Wrong", desc:"contradicts a known limit or contains an error", color:"var(--danger)", code:"WRG" },
+    known:              { label:"Known", desc:"correct, but already established", color:"var(--c-plan)", code:"KNW" },
+    plausible_but_hard: { label:"Plausible but hard", desc:"allowed, not established, major obstacles", color:"var(--accent)", code:"HRD" },
+    promising:          { label:"Promising", desc:"worth deeper research", color:"var(--good)", code:"PRM" },
+    underspecified:     { label:"Underspecified", desc:"needs more detail before it can be assessed", color:"var(--c-neutral)", code:"UND" }
+  };
+
+  // ---------------------------------------------------------------- helpers
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){
+    return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  }
+  function pad(n){ return (n<10?"0":"")+n; }
+  function fmtClock(sec){ var d = sec ? new Date(sec*1000) : new Date(); return pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds()); }
+  function fmtDuration(s){ s = Math.max(0, Math.round(s)); return s < 60 ? s+" s" : Math.floor(s/60)+" min "+pad(s%60)+" s"; }
+  function plural(n, w){ return n+" "+w+(n===1?"":"s"); }
+  function truncate(s, n){ s = String(s||""); return s.length > n ? s.slice(0, n-1)+"…" : s; }
+  function load(key, fallback){ try{ var raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }catch(e){ return fallback; } }
+  function store(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){} }
+  function list(items){ return items && items.length ? "<ul>"+items.map(function(x){ return "<li>"+x+"</li>"; }).join("")+"</ul>" : ""; }
+
+  async function api(method, path, body){
+    var opts = { method: method, headers: {} };
+    if(body !== undefined){ opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+    var res = await fetch(path, opts);
+    var data = null;
+    try{ data = await res.json(); }catch(e){}
+    if(!res.ok) throw new Error((data && data.error) || ("HTTP "+res.status));
+    return data;
+  }
+
+  // Small Markdown renderer for the reports: headings, lists, quotes, code, links, <details>.
+  function inlineMd(s){
+    return String(s).split(/(`[^`]+`)/g).map(function(part){
+      if(/^`[^`]+`$/.test(part)) return "<code>"+esc(part.slice(1,-1))+"</code>";
+      var h = esc(part);
+      h = h.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function(m, text, url){
+        return /^https?:\/\//i.test(url) ? '<a href="'+url+'" target="_blank" rel="noopener">'+text+"</a>" : text;
+      });
+      h = h.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*([^*\s][^*]*?)\*/g, "<em>$1</em>");
+      return h;
+    }).join("");
+  }
+  function renderMarkdown(src){
+    var lines = String(src||"").replace(/\r/g,"").split("\n");
+    var out = [], para = [], listTag = null, m;
+    function flushPara(){ if(para.length){ out.push("<p>"+inlineMd(para.join(" "))+"</p>"); para = []; } }
+    function flushList(){ if(listTag){ out.push("</"+listTag+">"); listTag = null; } }
+    function flush(){ flushPara(); flushList(); }
+    function openList(tag){ flushPara(); if(listTag !== tag){ flushList(); out.push("<"+tag+">"); listTag = tag; } }
+    for(var i = 0; i < lines.length; i++){
+      var t = lines[i].trim();
+      if(/^```/.test(t)){
+        flush();
+        var code = [];
+        for(i++; i < lines.length && !/^```/.test(lines[i].trim()); i++) code.push(lines[i]);
+        out.push("<pre><code>"+esc(code.join("\n"))+"</code></pre>");
+      } else if((m = t.match(/^<details><summary>(.*)<\/summary>$/))){ flush(); out.push("<details><summary>"+inlineMd(m[1])+"</summary>"); }
+      else if(t === "</details>"){ flush(); out.push("</details>"); }
+      else if((m = t.match(/^(#{1,6})\s+(.*)$/))){ flush(); var lv = Math.min(m[1].length+1, 6); out.push("<h"+lv+">"+inlineMd(m[2])+"</h"+lv+">"); }
+      else if(/^(-{3,}|\*{3,})$/.test(t)){ flush(); out.push("<hr>"); }
+      else if((m = t.match(/^>\s?(.*)$/))){ flush(); out.push("<blockquote>"+inlineMd(m[1])+"</blockquote>"); }
+      else if((m = t.match(/^[-*]\s+(.*)$/))){ openList("ul"); out.push("<li>"+inlineMd(m[1])+"</li>"); }
+      else if((m = t.match(/^\d+\.\s+(.*)$/))){ openList("ol"); out.push("<li>"+inlineMd(m[1])+"</li>"); }
+      else if(t === ""){ flush(); }
+      else { flushList(); para.push(t); }
+    }
+    flush();
+    return out.join("\n");
+  }
+
+  function downloadText(name, text, type){
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: type || "text/markdown" }));
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+  }
+
+  // ---------------------------------------------------------------- state
+
+  var serverConfig = null;    // GET /api/config
+  var lib = { prompts:[], domains:[], skills:[], benchmarks:[] };
+  var reports = [];
+  var settings = load("pandora_settings", null);
+  var collapsed = load("pandora_collapsed", { bench:true });
+  var showAllReports = false;
+  var active = { type:"run", id:"run" };
+  var runForm = { idea: load("pandora_draft", ""), domain:null, literature:null, compute:null };
+  var run = null;             // { id, status, events, result, error }
+  var pollTimer = null, tickTimer = null;
+  var modelsCache = [];
+
+  // ---------------------------------------------------------------- theme
+
+  var THEMES = ["auto","light","dark"];
+  function applyTheme(t){
+    if(t === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
+    $("themeBtn").title = "Theme: "+t;
+  }
+  var theme = load("pandora_theme", "auto");
+  applyTheme(theme);
+  $("themeBtn").addEventListener("click", function(){
+    theme = THEMES[(THEMES.indexOf(theme)+1) % THEMES.length];
+    store("pandora_theme", theme); applyTheme(theme);
+  });
+
+  // ---------------------------------------------------------------- status
+
+  function setStatus(kind, text){
+    $("statusDot").className = "tally-dot" + (kind ? " "+kind : "");
+    $("statusText").textContent = text;
+    $("statusText").title = text;
+  }
+
+  // ---------------------------------------------------------------- settings
+
+  function settingsFromConfig(cfg){
+    var l = cfg.llm;
+    var preset = PRESETS.filter(function(p){ return p.base_url && p.base_url === l.base_url && p.provider === l.provider; })[0];
+    if(!preset && l.provider === "anthropic") preset = PRESETS.filter(function(p){ return p.id === "anthropic"; })[0];
+    return {
+      preset: preset ? preset.id : "custom",
+      provider: l.provider, base_url: l.base_url || "", model: l.model,
+      temperature: l.temperature, max_tokens: l.max_tokens, timeout: l.timeout,
+      json_mode: !!l.json_mode, effort: l.effort || "high",
+      keys: (settings && settings.keys) || {}, s2_api_key: (settings && settings.s2_api_key) || ""
+    };
+  }
+  function currentKey(){ return (settings.keys && settings.keys[settings.preset]) || ""; }
+  function llmPayload(){
+    return {
+      provider: settings.provider, base_url: settings.base_url, model: settings.model,
+      temperature: Number(settings.temperature), max_tokens: Number(settings.max_tokens), timeout: Number(settings.timeout),
+      json_mode: !!settings.json_mode, effort: settings.effort, api_key: currentKey()
+    };
+  }
+
+  var presetRow = $("presetRow");
+  PRESETS.forEach(function(p){
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "preset-btn"; b.textContent = p.label; b.dataset.id = p.id;
+    b.addEventListener("click", function(){
+      readSettingsForm();
+      settings.preset = p.id;
+      if(p.id !== "custom"){
+        settings.provider = p.provider; settings.base_url = p.base_url;
+        if(p.model) settings.model = p.model;
+        settings.json_mode = p.json_mode;
+      }
+      fillSettingsForm();
+    });
+    presetRow.appendChild(b);
+  });
+
+  function fillSettingsForm(){
+    Array.prototype.forEach.call(presetRow.children, function(b){ b.className = "preset-btn"+(b.dataset.id === settings.preset ? " active" : ""); });
+    var p = PRESETS.filter(function(p){ return p.id === settings.preset; })[0];
+    $("presetHint").textContent = p ? p.hint : "";
+    $("providerInput").value = settings.provider;
+    $("baseUrlInput").value = settings.base_url;
+    $("baseUrlInput").disabled = settings.provider === "anthropic";
+    $("apiKeyInput").value = currentKey();
+    $("modelInput").value = settings.model;
+    $("tempInput").value = settings.temperature;
+    $("maxTokInput").value = settings.max_tokens;
+    $("timeoutInput").value = settings.timeout;
+    $("jsonModeInput").checked = !!settings.json_mode;
+    $("effortInput").value = settings.effort || "high";
+    $("effortField").hidden = settings.provider !== "anthropic";
+    $("s2KeyInput").value = settings.s2_api_key || "";
+    showModelInfo();
+  }
+  function readSettingsForm(){
+    settings.provider = $("providerInput").value;
+    settings.base_url = $("baseUrlInput").value.trim();
+    settings.keys = settings.keys || {};
+    settings.keys[settings.preset] = $("apiKeyInput").value.trim();
+    settings.model = $("modelInput").value.trim();
+    settings.temperature = $("tempInput").value;
+    settings.max_tokens = $("maxTokInput").value;
+    settings.timeout = $("timeoutInput").value;
+    settings.json_mode = $("jsonModeInput").checked;
+    settings.effort = $("effortInput").value;
+    settings.s2_api_key = $("s2KeyInput").value.trim();
+  }
+  function saveSettings(){ store("pandora_settings", settings); }
+
+  $("providerInput").addEventListener("change", function(){ readSettingsForm(); fillSettingsForm(); });
+  $("modelInput").addEventListener("input", showModelInfo);
+  document.querySelectorAll("[data-toggle]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var input = $(b.dataset.toggle);
+      input.type = input.type === "password" ? "text" : "password";
+      b.textContent = input.type === "password" ? "SHOW" : "HIDE";
+    });
+  });
+
+  function showModelInfo(){
+    var id = $("modelInput").value.trim();
+    var m = modelsCache.filter(function(x){ return x.id === id; })[0];
+    var txt = "";
+    if(modelsCache.length){
+      txt = m ? "Served by the endpoint" + (m.context ? " · context window "+Number(m.context).toLocaleString()+" tokens" : "") + "."
+              : "This model is not in the endpoint's list. Check the name.";
+    }
+    $("modelInfo").textContent = txt;
+  }
+
+  async function fetchModels(){
+    if(!$("settingsPanel").hidden) readSettingsForm();  // the form only holds the settings while it is open
+    var data = await api("POST", "/api/models", { provider: settings.provider, base_url: settings.base_url, api_key: currentKey() });
+    modelsCache = data.models || [];
+    var dl = $("modelList"); dl.innerHTML = "";
+    modelsCache.forEach(function(m){ var o = document.createElement("option"); o.value = m.id; dl.appendChild(o); });
+    if(!settings.model && modelsCache.length){ settings.model = modelsCache[0].id; $("modelInput").value = settings.model; }
+    showModelInfo();
+    return modelsCache;
+  }
+
+  function flashNote(text, bad){
+    var n = $("saveNote");
+    n.textContent = text; n.className = "save-note"+(bad ? " bad" : ""); n.hidden = false;
+    clearTimeout(flashNote.t); flashNote.t = setTimeout(function(){ n.hidden = true; }, 3500);
+  }
+
+  $("loadModelsBtn").addEventListener("click", async function(){
+    var btn = this; btn.disabled = true;
+    try{ var ms = await fetchModels(); flashNote(plural(ms.length, "model")+" found"); }
+    catch(e){ flashNote("Error: "+e.message, true); }
+    btn.disabled = false;
+  });
+  $("saveSettingsBtn").addEventListener("click", async function(){
+    readSettingsForm(); saveSettings(); flashNote("saved");
+    await checkConnection();
+    renderWorkspace();
+  });
+  $("resetSettingsBtn").addEventListener("click", async function(){
+    settings = settingsFromConfig(serverConfig); saveSettings(); fillSettingsForm(); flashNote("reset to config.yaml");
+    await checkConnection();
+    renderWorkspace();
+  });
+
+  function openSettings(open){
+    $("settingsPanel").hidden = !open;
+    $("settingsBtn").setAttribute("aria-expanded", String(open));
+    if(open) fillSettingsForm();
+  }
+  $("settingsBtn").addEventListener("click", function(){ openSettings($("settingsPanel").hidden); });
+
+  async function checkConnection(){
+    if(run && run.status === "running") return;
+    if(!settings.model){ setStatus("", "no model configured"); return; }
+    setStatus("", "checking connection…");
+    try{
+      var ms = await fetchModels();
+      var listed = ms.some(function(m){ return m.id === settings.model; });
+      if(listed) setStatus("ok", "connected · "+settings.model);
+      else setStatus("err", "connected, but model “"+settings.model+"” is not served");
+    }catch(e){
+      setStatus("err", "not reachable · "+truncate(e.message, 80));
+    }
+  }
+
+  // ---------------------------------------------------------------- library rack
+
+  function rackGroups(){
+    var groups = [
+      { key:"agent", label:"Agent", cat:"create", items:[
+        { type:"run", id:"run", code:"RUN", label:"Assess an idea", sub:"Run the full pipeline" } ] },
+      { key:"prompts", label:"Pipeline prompts", cat:"plan", items: lib.prompts.map(function(p){
+        var meta = STAGE_META[p.name] || { code: p.name.slice(0,3).toUpperCase(), label: p.name, sub: "" };
+        return { type:"prompt", id:p.name, code:meta.code, label:(meta.n ? meta.n+" · " : "")+meta.label, sub:versionSub(p, meta.sub) };
+      }) },
+      { key:"knowledge", label:"Knowledge bases", cat:"analyze", items: lib.domains.map(function(d){
+        return { type:"domain", id:d.name, code:"KB", label:d.name.replace(/_/g," "), sub:plural(d.limits.length, "known limit") };
+      }) },
+      { key:"skills", label:"Claude Code skills & agents", cat:"guard", items: lib.skills.map(function(s){
+        return { type:"skill", id:s.key, code: s.kind === "skill" ? "SKL" : "AGT", label:s.title,
+                 sub: versionSub(s, s.kind === "skill" ? "skill · /"+s.title : "subagent") };
+      }) },
+      { key:"bench", label:"Benchmark ideas", cat:"neutral", items: lib.benchmarks.map(function(b){
+        return { type:"bench", id:b.id, code:"BM", label:b.id.replace(/_/g," "), sub:"expected: "+b.acceptable.join(" / ") };
+      }) },
+      { key:"reports", label:"Runs & reports", cat:"create", items: reports.map(function(r){
+        var v = VERDICT[r.verdict], hist = runsOfIdea(r);
+        return { type:"report", id:r.name, code: v ? v.code : "—", color: v ? v.color : null,
+                 label: truncate(r.idea || r.name, 70),
+                 sub: fmtDate(r.started_at).slice(0,10) + (hist.length > 1 ? " · run "+(hist.indexOf(r)+1)+"/"+hist.length : "") + (v ? " · "+v.label.toLowerCase() : "") };
+      }) }
+    ];
+    return groups;
+  }
+
+  function renderRack(){
+    var rack = $("rack"); rack.innerHTML = "";
+    rackGroups().forEach(function(g){
+      if(!g.items.length && g.key !== "reports") return;
+      var wrap = document.createElement("div");
+      wrap.className = "skill-group";
+      wrap.style.setProperty("--cat", "var(--c-"+g.cat+")");
+      var head = document.createElement("button");
+      head.type = "button"; head.className = "skill-group-header";
+      head.setAttribute("aria-expanded", String(!collapsed[g.key]));
+      head.innerHTML = '<span class="twisty">'+(collapsed[g.key] ? "▸" : "▾")+'</span><span class="label">'+esc(g.label)+'</span><span class="count">'+g.items.length+"</span>";
+      head.addEventListener("click", function(){ collapsed[g.key] = !collapsed[g.key]; store("pandora_collapsed", collapsed); renderRack(); });
+      wrap.appendChild(head);
+      if(!collapsed[g.key]){
+        var items = g.items;
+        if(g.key === "reports" && !showAllReports && items.length > 8) items = items.slice(0, 8);
+        if(!items.length){
+          var e = document.createElement("p"); e.className = "hint"; e.style.paddingLeft = "20px";
+          e.textContent = "No reports yet."; wrap.appendChild(e);
+        }
+        items.forEach(function(it){
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = "skill-card"+(active.type === it.type && active.id === it.id ? " active" : "");
+          if(it.color) b.style.setProperty("--cat", it.color);
+          var live = it.type === "run" && run && run.status === "running" ? '<span class="live-dot" title="running"></span>' : "";
+          b.innerHTML = '<span class="channel-badge">'+esc(it.code)+'</span><span class="skill-name">'+esc(it.label)+
+                        (it.sub ? '<span class="skill-sub">'+esc(it.sub)+"</span>" : "")+"</span>"+live;
+          b.addEventListener("click", function(){ select(it.type, it.id); });
+          wrap.appendChild(b);
+        });
+        if(g.key === "reports" && g.items.length > 8){
+          var more = document.createElement("button");
+          more.type = "button"; more.className = "more-btn";
+          more.textContent = showAllReports ? "show fewer" : "show all "+g.items.length;
+          more.addEventListener("click", function(){ showAllReports = !showAllReports; renderRack(); });
+          wrap.appendChild(more);
+        }
+      }
+      rack.appendChild(wrap);
+    });
+  }
+
+  function select(type, id){
+    if(editor.open){
+      var editing = findEntry(editor.key);
+      if(editing && !sameText(editor.draft, editing.text) && !confirm("Discard your unsaved changes to "+editing.file+"?")) return;
+      editor.open = false;
+    }
+    active = { type:type, id:id };
+    history.replaceState(null, "", type === "run" ? location.pathname : "#"+type+"/"+encodeURIComponent(id));
+    renderRack(); renderWorkspace();
+    if(window.innerWidth <= 820) $("workspace").scrollIntoView({ behavior:"smooth", block:"start" });
+  }
+
+  // ---------------------------------------------------------------- workspace
+
+  var ws = $("workspace");
+  function head(title, cat, catLabel, file){
+    return '<div class="ws-head" style="--cat:var(--c-'+cat+')"><h3>'+esc(title)+'</h3><span class="ws-cat">'+esc(catLabel)+"</span>"+
+           (file ? '<span class="ws-file">'+esc(file)+"</span>" : "")+"</div>";
+  }
+
+  function renderWorkspace(){
+    var t = active.type;
+    if(t === "run") return renderRun();
+    if(t === "prompt") return renderPrompt(active.id);
+    if(t === "domain") return renderDomain(active.id);
+    if(t === "skill") return renderSkill(active.id);
+    if(t === "bench") return renderBench(active.id);
+    if(t === "report") return renderReport(active.id);
+  }
+
+  // -- run view --
+
+  function renderRun(){
+    if(!serverConfig){ ws.innerHTML = '<p class="empty">loading…</p>'; return; }
+    var running = run && run.status === "running";
+    var domains = serverConfig.domains || [];
+    if(runForm.domain == null) runForm.domain = serverConfig.domain;
+    if(runForm.literature == null) runForm.literature = serverConfig.literature.enabled;
+    if(runForm.compute == null) runForm.compute = serverConfig.compute.enabled;
+    var html = head("Assess an idea", "create", "AGENT") +
+      '<p class="ws-desc">Pandora restates your idea as a precise claim, searches the literature, checks it against the known limits of the domain, computes the decisive number, lets a critic attack it and then gives one of five verdicts: wrong, known, plausible but hard, promising or underspecified.</p>' +
+      '<div class="field"><label for="ideaInput">Idea or hypothesis</label><textarea id="ideaInput" rows="5" placeholder="e.g. Using orbital angular momentum modes, a single-frequency radio link can carry unlimited data without more bandwidth or power."'+(running?" disabled":"")+">"+esc(runForm.idea)+"</textarea></div>" +
+      '<div class="field-grid tight">' +
+        '<div class="field"><label for="domainInput">Knowledge base</label><select id="domainInput"'+(running?" disabled":"")+">"+domains.map(function(d){ return '<option value="'+esc(d)+'"'+(d===runForm.domain?" selected":"")+">"+esc(d)+"</option>"; }).join("")+"</select></div>" +
+        '<div class="field"><span class="label">Tools</span><label class="check"><input type="checkbox" id="litInput"'+(runForm.literature?" checked":"")+(running?" disabled":"")+"> literature search</label></div>" +
+        '<div class="field"><span class="label">&nbsp;</span><label class="check"><input type="checkbox" id="compInput"'+(runForm.compute?" checked":"")+(running?" disabled":"")+"> run Python check</label></div>" +
+      "</div>" +
+      '<div class="ws-actions">' +
+        '<button class="btn" id="runBtn" type="button"'+(running?" disabled":"")+">"+(running ? "Running…" : "Run Pandora")+"</button>" +
+        (running ? '<button class="btn secondary" id="cancelBtn" type="button">Cancel</button>' : "") +
+        '<span class="hint" id="runHint">'+esc(runHint())+"</span>" +
+      "</div>" +
+      (serverConfig.stages && Object.keys(serverConfig.stages).length ? '<p class="hint">Per-stage overrides from config.yaml also apply: '+esc(Object.keys(serverConfig.stages).map(function(s){ return s+" → "+(serverConfig.stages[s].model||"…"); }).join(", "))+"</p>" : "") +
+      '<div class="flow-steps" id="stageList">'+(run ? renderStages() : "")+"</div>" +
+      '<div id="resultBox">'+(run ? renderResult() : "")+"</div>";
+    ws.innerHTML = html;
+
+    var idea = $("ideaInput");
+    idea.addEventListener("input", function(){ runForm.idea = idea.value; store("pandora_draft", runForm.idea); });
+    idea.addEventListener("keydown", function(e){ if(e.key === "Enter" && (e.ctrlKey || e.metaKey)) startRun(); });
+    $("domainInput").addEventListener("change", function(){ runForm.domain = this.value; });
+    $("litInput").addEventListener("change", function(){ runForm.literature = this.checked; });
+    $("compInput").addEventListener("change", function(){ runForm.compute = this.checked; });
+    $("runBtn").addEventListener("click", startRun);
+    if($("cancelBtn")) $("cancelBtn").addEventListener("click", cancelRun);
+    var openBtn = $("openReportBtn");
+    if(openBtn) openBtn.addEventListener("click", function(){ select("report", run.result.report); });
+    var dlBtn = $("dlReportBtn");
+    if(dlBtn) dlBtn.addEventListener("click", function(){ downloadText(run.result.report+".md", run.result.markdown); });
+  }
+
+  function runHint(){
+    if(run && run.status === "running"){
+      var start = run.events.length ? run.events[0].t : Date.now()/1000;
+      return "running for "+fmtDuration(Date.now()/1000 - start)+" · "+(currentStage() || "starting");
+    }
+    var target = settings.provider === "anthropic" ? "Anthropic API" : settings.base_url;
+    return settings.model ? settings.model+" @ "+target+" · Ctrl+Enter to run" : "Configure a model in ⚙ first";
+  }
+  function currentStage(){
+    if(!run) return null;
+    for(var i = run.events.length-1; i >= 0; i--) if(run.events[i].kind === "stage") return run.events[i].stage;
+    return null;
+  }
+
+  function reduceRun(){
+    var st = {};
+    FLOW.forEach(function(s){ st[s] = { status:"pending", seconds:0, calls:0, parsed:null, invalid:0 }; });
+    var cur = null, searchStart = null, ended = null;
+    run.events.forEach(function(e){
+      var s = st[e.stage];
+      if(e.kind === "stage" && s){
+        if(cur && st[cur].status === "current") st[cur].status = "done";
+        cur = e.stage; s.status = "current";
+      } else if(e.kind === "llm_request" && s){ s.calls++; s.model = e.model; }
+      else if(e.kind === "llm_response" && s){
+        s.seconds += e.seconds || 0;
+        if(e.parsed) s.parsed = e.parsed; else s.invalid++;
+      } else if(e.kind === "search_start"){ st.search.queries = e.queries; searchStart = e.t; }
+      else if(e.kind === "search_result"){ st.search.papers = e.papers; st.search.count = e.count; st.search.seconds = e.t - searchStart; }
+      else if(e.kind === "sandbox_result"){ st.compute.sandbox = e; }
+      else if(e.kind === "end"){ ended = e.status; }
+    });
+    if(ended){
+      if(cur && st[cur].status === "current") st[cur].status = ended === "done" ? "done" : ended;
+      FLOW.forEach(function(s){ if(st[s].status === "pending") st[s].status = "skipped"; });
+    }
+    return st;
+  }
+
+  function stageSummary(name, s){
+    var p = s.parsed || {}, h = [];
+    if(name === "search"){
+      if(s.queries) h.push('<div><span class="dim">Queries:</span> '+s.queries.map(function(q){ return "<code>"+esc(q)+"</code>"; }).join(" · ")+"</div>");
+      if(s.papers){
+        h.push('<div class="dim">'+plural(s.count, "paper")+" found"+(s.count > 6 ? ", first 6 shown" : "")+":</div>");
+        h.push(list(s.papers.slice(0, 6).map(function(x){
+          return (x.url ? '<a href="'+esc(x.url)+'" target="_blank" rel="noopener">'+esc(x.title)+"</a>" : esc(x.title))+' <span class="dim">('+esc(x.year || "n.d.")+", "+esc(x.source)+")</span>";
+        })));
+      }
+    } else if(name === "formalize"){
+      if(p.claim) h.push("<div>"+esc(p.claim)+"</div>");
+      if(p.predicted_quantity) h.push('<div><span class="dim">Predicted quantity:</span> '+esc(p.predicted_quantity)+"</div>");
+      if(p.assumptions && p.assumptions.length) h.push('<div class="dim">Assumptions:</div>'+list(p.assumptions.map(esc)));
+      if(p.underspecified && p.clarifying_questions) h.push('<div class="dim">Clarifying questions:</div>'+list(p.clarifying_questions.map(esc)));
+    } else if(name === "literature"){
+      if(p.novelty || p.established_field) h.push('<div><span class="tag">'+esc(p.novelty || "?")+"</span> "+esc(p.established_field || "")+"</div>");
+      if(p.summary) h.push('<div class="dim">'+esc(p.summary)+"</div>");
+      if(p.closest_prior_work && p.closest_prior_work.length) h.push(list(p.closest_prior_work.slice(0,4).map(function(w){
+        return (w.url ? '<a href="'+esc(w.url)+'" target="_blank" rel="noopener">'+esc(w.title)+"</a>" : esc(w.title))+(w.relevance ? ' <span class="dim">— '+esc(w.relevance)+"</span>" : "");
+      })));
+    } else if(name === "limits"){
+      if(p.violates_known_limit != null) h.push('<div><span class="tag '+(p.violates_known_limit ? "yes" : "no")+'">'+(p.violates_known_limit ? "violates a known limit" : "no violation found")+"</span></div>");
+      if(p.applicable_limits && p.applicable_limits.length) h.push(list(p.applicable_limits.map(function(l){ return "<strong>"+esc(l.name)+"</strong>"+(l.implication ? ": "+esc(l.implication) : ""); })));
+      if(p.relaxed_assumptions && p.relaxed_assumptions.length) h.push('<div><span class="dim">Relaxed assumptions:</span> '+esc(p.relaxed_assumptions.join("; "))+"</div>");
+      if(p.quantitative_question) h.push('<div><span class="dim">Decisive question:</span> '+esc(p.quantitative_question)+"</div>");
+    } else if(name === "compute"){
+      if(p.purpose) h.push("<div>"+esc(p.purpose)+"</div>");
+      var sb = s.sandbox;
+      if(sb){
+        h.push('<div><span class="tag '+(sb.ok ? "no" : "yes")+'">'+(sb.ok ? "script ran" : (sb.timed_out ? "timed out" : "script failed"))+"</span>"+(s.calls > 1 ? ' <span class="dim">after '+s.calls+" attempts</span>" : "")+"</div>");
+        if(sb.result) h.push("<pre class=\"prompt\" style=\"max-height:180px\">"+esc(JSON.stringify(sb.result, null, 2))+"</pre>");
+      }
+    } else if(name === "critic"){
+      if(p.objections && p.objections.length) h.push(list(p.objections.map(function(o){ return '<span class="tag '+esc(String(o.severity||"").toLowerCase())+'">'+esc(o.severity || "?")+"</span>"+esc(o.objection); })));
+      if(p.steelman) h.push('<div><span class="dim">Steelman:</span> '+esc(p.steelman)+"</div>");
+    } else if(name === "verdict"){
+      var v = VERDICT[String(p.verdict||"").toLowerCase()];
+      if(v) h.push('<div><strong style="color:'+v.color+'">'+esc(v.label)+"</strong>"+(p.confidence != null ? ' <span class="dim">· confidence '+Math.round(p.confidence*100)+"%</span>" : "")+"</div>");
+    }
+    if(s.invalid && name !== "search") h.push('<div class="dim">'+plural(s.invalid, "reply")+" without valid JSON, retried</div>");
+    return h.join("");
+  }
+
+  function renderStages(){
+    var st = reduceRun();
+    var n = 0;
+    return FLOW.map(function(name){
+      var s = st[name], meta = STAGE_META[name];
+      n++;
+      var status = { pending:"waiting", current: "running…"+(s.calls > 1 ? " (attempt "+s.calls+")" : ""), done: s.seconds ? s.seconds.toFixed(1)+" s" : "done",
+                     skipped:"skipped", error:"failed", cancelled:"cancelled" }[s.status];
+      var body = s.status === "pending" || s.status === "skipped" ? "" : stageSummary(name, s);
+      return '<div class="flow-step '+s.status+'"><div class="flow-step-head"><span class="num">'+n+"</span><strong>"+esc(meta.label)+'</strong><span class="channel-badge" style="--cat:var(--c-plan)">'+meta.code+'</span><span class="flow-step-status">'+esc(status)+"</span></div>"+
+             (body ? '<div class="stage-body">'+body+"</div>" : "")+"</div>";
+    }).join("");
+  }
+
+  function verdictCard(v){
+    if(!v) return "";
+    var meta = VERDICT[v.verdict] || { label: v.verdict, desc:"", color:"var(--c-neutral)" };
+    var conf = Math.round((v.confidence || 0)*100);
+    var rows = [["Deciding argument", v.deciding_argument], ["Relaxed assumption", v.relaxed_assumption],
+                ["Closest legitimate idea", v.salvage], ["Next step", v.next_step]]
+      .filter(function(r){ return r[1]; })
+      .map(function(r){ return '<span class="k">'+esc(r[0])+"</span><span>"+esc(r[1])+"</span>"; }).join("");
+    return '<div class="verdict-card" style="--v:'+meta.color+'">' +
+      '<div class="verdict-top"><span class="verdict-label">'+esc(meta.label)+'</span><span class="verdict-desc">'+esc(meta.desc)+"</span></div>" +
+      '<div class="meter">confidence <span class="bar"><span style="width:'+conf+'%"></span></span> '+conf+"%</div>" +
+      (rows ? '<div class="kv">'+rows+"</div>" : "") +
+      (v.summary ? '<div class="md">'+renderMarkdown(v.summary)+"</div>" : "") +
+    "</div>";
+  }
+
+  function renderResult(){
+    if(run.status === "error") return '<div class="error-box">Run failed: '+esc(run.error || "unknown error")+"\n\nSee the agent trace below for details.</div>";
+    if(run.status === "cancelled") return '<div class="error-box">Run cancelled.</div>';
+    if(run.status !== "done" || !run.result) return "";
+    var a = run.result.assessment;
+    return verdictCard(a.verdict) +
+      '<div class="ws-actions" style="margin-top:10px"><button class="btn secondary small" id="openReportBtn" type="button">Open report</button>' +
+      '<button class="btn secondary small" id="dlReportBtn" type="button">Download Markdown</button>' +
+      '<span class="hint">saved as '+esc(run.result.report)+".md</span></div>";
+  }
+
+  function refreshRunView(){
+    if(active.type !== "run") return;
+    var running = run && run.status === "running";
+    var form = $("ideaInput");
+    // Re-render fully when the running state flips; otherwise only the live parts.
+    if(!form || form.disabled !== !!running) return renderRun();
+    $("stageList").innerHTML = run ? renderStages() : "";
+    $("resultBox").innerHTML = run ? renderResult() : "";
+    $("runHint").textContent = runHint();
+  }
+
+  async function startRun(){
+    if(run && run.status === "running") return;
+    var idea = (runForm.idea || "").trim();
+    if(!idea){ $("ideaInput").focus(); return; }
+    if(!settings.model){ openSettings(true); flashNote("Choose a model first", true); return; }
+    clearTrace();
+    try{
+      var res = await api("POST", "/api/runs", {
+        idea: idea, llm: llmPayload(), s2_api_key: settings.s2_api_key,
+        domain: runForm.domain, literature: runForm.literature, compute: runForm.compute
+      });
+      run = { id: res.id, status:"running", events:[], result:null, error:null };
+      setStatus("live", "running · "+settings.model);
+      renderRack(); renderRun();
+      startPolling();
+    }catch(e){
+      addTrace({ kind:"error", t: Date.now()/1000, message: e.message });
+      if($("resultBox")) $("resultBox").innerHTML = '<div class="error-box">'+esc(e.message)+"</div>";
+    }
+  }
+
+  async function cancelRun(){
+    if(!run) return;
+    try{ await api("POST", "/api/runs/"+run.id+"/cancel", {}); }catch(e){}
+    var b = $("cancelBtn"); if(b){ b.disabled = true; b.textContent = "Cancelling after the current call…"; }
+  }
+
+  function startPolling(){
+    clearInterval(pollTimer); clearInterval(tickTimer);
+    pollTimer = setInterval(poll, 1000);
+    tickTimer = setInterval(function(){ if(active.type === "run" && $("runHint")) $("runHint").textContent = runHint(); }, 1000);
+    poll();
+  }
+  var polling = false;
+  async function poll(){
+    if(!run || polling) return;
+    polling = true;
+    try{
+      var snap = await api("GET", "/api/runs/"+run.id+"?since="+run.events.length);
+      snap.events.forEach(function(e){ run.events.push(e); addTrace(e); });
+      run.result = snap.result; run.error = snap.error;
+      var ended = run.events.some(function(e){ return e.kind === "end"; });
+      run.status = ended ? snap.status : "running";
+      if(run.status === "running") setStatus("live", "running · "+(currentStage() || "starting")+" · "+settings.model);
+      if(ended){
+        clearInterval(pollTimer); clearInterval(tickTimer);
+        if(run.status === "done") setStatus("ok", "done · "+(run.result && run.result.assessment.verdict ? run.result.assessment.verdict.verdict : ""));
+        else setStatus("err", run.status === "cancelled" ? "cancelled" : "run failed");
+        await loadReports();
+        renderRack();
+      }
+      refreshRunView();
+    }catch(e){
+      setStatus("err", "lost contact with the Pandora server");
+    }
+    polling = false;
+  }
+
+  // -- prompt view --
+
+  // -- versioned editing (prompts, skills, agents) --
+
+  var editor = { key:null, open:false, draft:"", note:"", preview:null, compare:null, flash:"" };
+  function editorFor(key){
+    if(editor.key !== key) editor = { key:key, open:false, draft:"", note:"", preview:null, compare:null, flash:"" };
+    return editor;
+  }
+  function findEntry(key){ return lib.prompts.concat(lib.skills).filter(function(e){ return e.key === key; })[0]; }
+  function replaceEntry(entry){
+    ["prompts","skills"].forEach(function(g){ lib[g] = lib[g].map(function(e){ return e.key === entry.key ? entry : e; }); });
+  }
+  function versionOf(e, n){ return e.versions.filter(function(v){ return v.n === n; })[0]; }
+  function versionSub(e, sub){
+    if(e.active && e.versions.length > 1) return "v"+e.active+" · "+sub;
+    if(!e.active && e.versions.length) return "unversioned change · "+sub;
+    return sub;
+  }
+  function nextVersion(e){
+    var n = e.versions.length ? e.versions[e.versions.length-1].n : 0;
+    return (e.active ? n : n+1) + 1;  // without an active version the current file text is recorded first
+  }
+  function fmtDate(iso){
+    if(!iso) return "";
+    var d = new Date(iso);
+    return isNaN(d) ? iso : d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+pad(d.getHours())+":"+pad(d.getMinutes());
+  }
+  function sameText(a, b){ return String(a).replace(/\r\n/g, "\n").replace(/\n+$/, "") === String(b).replace(/\r\n/g, "\n").replace(/\n+$/, ""); }
+
+  function versionBadge(e){
+    if(e.active) return '<span class="ver-badge" title="The file contains this version">v'+e.active+" of "+e.versions.length+" · active</span>";
+    if(!e.versions.length) return '<span class="ws-file">original · no versions yet</span>';
+    return '<span class="ver-badge warn" title="The file differs from every saved version, e.g. after an edit outside Pandora or a git pull. It is saved as a version automatically on your next save or activation.">unversioned change in file</span>';
+  }
+
+  function checkDraft(e, text){
+    var errs = [], warns = [];
+    if(!text.trim()) errs.push("The text is empty.");
+    if(e.kind === "prompt"){
+      if(e.name !== "system"){
+        var first = (text.split("\n").filter(function(l){ return l.trim(); })[0] || "").trim();
+        if(first !== "# Stage: "+e.name) errs.push("The first line must be “# Stage: "+e.name+"”: the pipeline uses it to recognise the stage.");
+        if(!/\{[\s\S]*\}/.test(text)) warns.push("No JSON schema found. The model must still reply with an object matching "+((STAGE_META[e.name] || {}).output || "the stage schema")+".");
+      }
+      var vars = [];
+      (text.match(/\$(\w+)/g) || []).forEach(function(v){ v = v.slice(1); if(vars.indexOf(v) === -1) vars.push(v); });
+      e.expected_variables.forEach(function(v){
+        if(vars.indexOf(v) === -1) warns.push("$"+v+" was removed: "+(VAR_INFO[v] || "this input")+" will no longer reach the model.");
+      });
+      vars.forEach(function(v){
+        if(e.expected_variables.indexOf(v) === -1) warns.push("$"+v+" is not filled in by the pipeline and will be sent literally.");
+      });
+    } else {
+      var m = text.match(/^---\n([\s\S]*?)\n---/);
+      if(!m) errs.push("The file must start with YAML front matter between two --- lines.");
+      else {
+        if(!/^name:/m.test(m[1])) errs.push("The front matter needs a “name:” line.");
+        if(!/^description:/m.test(m[1])) errs.push("The front matter needs a “description:” line.");
+      }
+    }
+    if(sameText(text, e.text)) warns.push("No changes yet.");
+    return { errs: errs, warns: warns };
+  }
+  function issuesHtml(c){
+    if(!c.errs.length && !c.warns.length) return '<div class="msgs"><span class="ok">Looks valid.</span></div>';
+    return '<div class="msgs">'+c.errs.map(function(x){ return '<span class="err">✕ '+esc(x)+"</span>"; }).join("")+
+           c.warns.map(function(x){ return '<span class="warn">! '+esc(x)+"</span>"; }).join("")+"</div>";
+  }
+
+  // Line diff (longest common subsequence); long unchanged stretches are folded.
+  function lineDiff(a, b){
+    var A = a.replace(/\n$/, "").split("\n"), B = b.replace(/\n$/, "").split("\n"), n = A.length, m = B.length;
+    var dp = new Int32Array((n+1)*(m+1)), w = m+1, i, j;
+    for(i = n-1; i >= 0; i--) for(j = m-1; j >= 0; j--)
+      dp[i*w+j] = A[i] === B[j] ? dp[(i+1)*w+j+1]+1 : Math.max(dp[(i+1)*w+j], dp[i*w+j+1]);
+    var out = []; i = 0; j = 0;
+    while(i < n || j < m){
+      if(i < n && j < m && A[i] === B[j]){ out.push(["same", A[i]]); i++; j++; }
+      else if(j < m && (i >= n || dp[i*w+j+1] >= dp[(i+1)*w+j])){ out.push(["add", B[j]]); j++; }
+      else { out.push(["del", A[i]]); i++; }
+    }
+    return out;
+  }
+  function diffHtml(a, b){
+    var d = lineDiff(a, b), html = [], k = 0;
+    if(!d.some(function(x){ return x[0] !== "same"; })) return '<pre class="diff"><span class="skip">No differences.</span></pre>';
+    while(k < d.length){
+      if(d[k][0] !== "same"){ html.push('<span class="'+d[k][0]+'">'+(esc(d[k][1]) || " ")+"</span>"); k++; continue; }
+      var start = k; while(k < d.length && d[k][0] === "same") k++;
+      var run = d.slice(start, k);
+      if(run.length > 6){
+        var headN = start === 0 ? 0 : 2, tailN = k === d.length ? 0 : 2;
+        run.slice(0, headN).forEach(function(x){ html.push('<span class="same">'+(esc(x[1]) || " ")+"</span>"); });
+        html.push('<span class="skip">… '+(run.length-headN-tailN)+" unchanged lines …</span>");
+        run.slice(run.length-tailN).forEach(function(x){ html.push('<span class="same">'+(esc(x[1]) || " ")+"</span>"); });
+      } else run.forEach(function(x){ html.push('<span class="same">'+(esc(x[1]) || " ")+"</span>"); });
+    }
+    return '<pre class="diff">'+html.join("")+"</pre>";
+  }
+
+  // The part of a prompt/skill view below the description: version bar, editor or viewer, history.
+  function versionedBody(e, renderView){
+    var ed = editorFor(e.key), h = [];
+    var previewing = ed.preview != null && ed.preview !== e.active ? versionOf(e, ed.preview) : null;
+    h.push('<div class="ws-actions">'+versionBadge(e)+
+      (ed.open ? "" : '<button class="btn small" type="button" data-act="edit">Edit</button>')+
+      '<button class="btn secondary small" type="button" data-act="copy">Copy text</button>'+
+      (ed.flash ? '<span class="save-note">'+esc(ed.flash)+"</span>" : "")+"</div>");
+    if(ed.open){
+      var c = checkDraft(e, ed.draft);
+      h.push('<div class="editor"><label for="draftInput">Editing '+esc(e.file)+" · will become v"+nextVersion(e)+"</label>"+
+        '<textarea id="draftInput" spellcheck="false">'+esc(ed.draft)+"</textarea>"+
+        '<div id="draftIssues">'+issuesHtml(c)+"</div>"+
+        '<div class="field"><label for="noteInput">What changed? (optional, shown in the history)</label><input id="noteInput" value="'+esc(ed.note)+'" placeholder="e.g. stricter dimensional check" autocomplete="off"></div>'+
+        '<div class="ws-actions"><button class="btn" type="button" data-act="save" id="saveVerBtn"'+(c.errs.length ? " disabled" : "")+">Save as v"+nextVersion(e)+" and activate</button>"+
+        '<button class="btn secondary" type="button" data-act="cancel">Cancel</button><span class="save-note bad" id="saveErr" hidden></span></div>'+
+        '<p class="hint">Saving writes <code>'+esc(e.file)+"</code>, so the CLI, Claude Code and Pandora all use the new text. Earlier texts stay in the history and can be re-activated at any time."+
+        (e.kind === "prompt" ? " Runs already in progress keep the prompts they started with. To check the effect, run the benchmark ideas again." : "")+"</p></div>");
+    } else if(previewing){
+      h.push('<div class="preview-banner">Viewing <strong>v'+previewing.n+"</strong> from "+esc(fmtDate(previewing.created))+" (not active)."+
+        '<button class="btn small" type="button" data-act="activate" data-n="'+previewing.n+'">Activate v'+previewing.n+"</button>"+
+        '<button class="btn secondary small" type="button" data-act="compare" data-n="'+previewing.n+'">Compare with active</button>'+
+        '<button class="btn secondary small" type="button" data-act="unpreview">Show active</button></div>');
+      h.push('<pre class="prompt">'+highlightVars(previewing.text)+"</pre>");
+    } else {
+      h.push(renderView(e));
+    }
+    if(ed.compare != null){
+      var cv = versionOf(e, ed.compare);
+      if(cv) h.push('<div class="section-title">Changes from v'+cv.n+" to the active text</div>"+diffHtml(cv.text, e.text)+
+        '<div><button class="link-btn" type="button" data-act="uncompare">close comparison</button></div>');
+    }
+    if(e.versions.length){
+      h.push('<div class="section-title">Version history</div><ul class="version-list">'+e.versions.slice().reverse().map(function(v){
+        var isActive = v.n === e.active, isFirst = v.n === e.versions[0].n;
+        return '<li class="'+(isActive ? "current" : "")+'"><span class="vn">v'+v.n+'</span><span class="vdate">'+esc(fmtDate(v.created))+"</span>"+
+          '<span class="vnote">'+esc(v.note || (v.source === "file" ? "from file" : ""))+(isActive ? ' <span class="tag no">active</span>' : "")+"</span>"+
+          '<span class="vbtns">'+
+            (isActive ? "" : '<button class="link-btn" type="button" data-act="preview" data-n="'+v.n+'">view</button>')+
+            (isActive ? "" : '<button class="link-btn" type="button" data-act="compare" data-n="'+v.n+'">compare</button>')+
+            (isActive ? "" : '<button class="link-btn" type="button" data-act="activate" data-n="'+v.n+'">activate</button>')+
+            (isActive || isFirst ? "" : '<button class="link-btn danger" type="button" data-act="delete" data-n="'+v.n+'">delete</button>')+
+          "</span></li>";
+      }).join("")+"</ul>");
+    }
+    return h.join("");
+  }
+
+  function bindEditorInputs(e){
+    var ta = $("draftInput");
+    if(ta){
+      ta.addEventListener("input", function(){
+        editor.draft = ta.value;
+        var c = checkDraft(e, editor.draft);
+        $("draftIssues").innerHTML = issuesHtml(c);
+        $("saveVerBtn").disabled = c.errs.length > 0;
+      });
+      ta.addEventListener("keydown", function(ev){
+        if(ev.key === "Tab"){ ev.preventDefault(); document.execCommand("insertText", false, "  "); }
+        if(ev.key === "s" && (ev.ctrlKey || ev.metaKey)){ ev.preventDefault(); if(!$("saveVerBtn").disabled) versionAction("save", {}); }
+      });
+      $("noteInput").addEventListener("input", function(){ editor.note = this.value; });
+    }
+  }
+
+  async function versionAction(act, data){
+    var e = findEntry(editor.key);
+    if(!e) return;
+    var n = data.n != null ? Number(data.n) : null;
+    if(act === "edit"){ editor.open = true; editor.draft = e.text; editor.note = ""; editor.preview = null; editor.flash = ""; }
+    else if(act === "cancel"){
+      if(!sameText(editor.draft, e.text) && !confirm("Discard your changes?")) return;
+      editor.open = false;
+    }
+    else if(act === "copy"){
+      var txt = editor.preview != null && versionOf(e, editor.preview) ? versionOf(e, editor.preview).text : e.text;
+      navigator.clipboard.writeText(txt).then(function(){ editor.flash = "copied"; renderWorkspace(); });
+      return;
+    }
+    else if(act === "preview"){ editor.preview = n; }
+    else if(act === "unpreview"){ editor.preview = null; }
+    else if(act === "compare"){ editor.compare = n; }
+    else if(act === "uncompare"){ editor.compare = null; }
+    else if(act === "save" || act === "activate" || act === "delete"){
+      if(act === "delete" && !confirm("Delete v"+n+" from the history? This cannot be undone.")) return;
+      if(act === "activate" && editor.open && !sameText(editor.draft, e.text) && !confirm("Discard your unsaved changes and activate v"+n+"?")) return;
+      try{
+        var body = act === "save" ? { key:e.key, text:editor.draft, note:editor.note } : { key:e.key, n:n };
+        var res = await api("POST", "/api/versions/"+act, body);
+        replaceEntry(res.entry);
+        if(act === "save"){ editor.open = false; editor.flash = res.entry.active ? "saved as v"+res.entry.active+" and activated" : "saved"; }
+        if(act === "activate"){ editor.open = false; editor.preview = null; editor.compare = null; editor.flash = "v"+n+" is now active"; }
+        if(act === "delete"){ if(editor.preview === n) editor.preview = null; if(editor.compare === n) editor.compare = null; editor.flash = "v"+n+" deleted"; }
+        renderRack();
+      }catch(err){
+        if(act === "save" && $("saveErr")){ $("saveErr").textContent = err.message; $("saveErr").hidden = false; return; }
+        alert(err.message);
+        return;
+      }
+    }
+    renderWorkspace();
+  }
+
+  ws.addEventListener("click", function(ev){
+    var b = ev.target.closest("[data-act]");
+    if(!b || !ws.contains(b)) return;
+    if(b.dataset.act === "open-prompt"){
+      select("prompt", b.dataset.name);
+      if(b.dataset.n){ var e = findEntry("prompt:"+b.dataset.name); editorFor("prompt:"+b.dataset.name).preview = Number(b.dataset.n) === e.active ? null : Number(b.dataset.n); renderWorkspace(); }
+      return;
+    }
+    if(b.dataset.act === "open-report"){ select("report", b.dataset.name); return; }
+    versionAction(b.dataset.act, b.dataset);
+  });
+
+  function highlightVars(t){
+    return esc(t)
+      .replace(/^(# Stage: \w+)$/m, '<span class="h">$1</span>')
+      .replace(/\$(\w+)/g, function(m, v){ return '<span class="v" title="'+esc(VAR_INFO[v] || "")+'">$'+v+"</span>"; });
+  }
+
+  function renderPrompt(name){
+    var p = findEntry("prompt:"+name);
+    if(!p){ ws.innerHTML = '<p class="empty">Prompt not found.</p>'; return; }
+    var meta = STAGE_META[name] || { label:name, desc:"" };
+    var vars = p.variables.map(function(v){ return '<span class="k">$'+esc(v)+'</span><span class="v">'+esc(VAR_INFO[v] || "")+"</span>"; }).join("");
+    ws.innerHTML = head((meta.n ? "Stage "+meta.n+" · " : "")+meta.label, "plan", name === "system" ? "SYSTEM PROMPT" : "STAGE PROMPT", p.file) +
+      '<p class="ws-desc">'+esc(meta.desc)+"</p>" +
+      (meta.output ? '<p class="hint">The reply must be one JSON object; Pandora validates it against <code>'+esc(meta.output)+"</code> in models.py and retries once with the validation error if it does not fit.</p>" : "") +
+      (vars ? '<div class="field"><span class="label">Filled in at run time</span><div class="var-table">'+vars+"</div></div>" : "") +
+      versionedBody(p, function(e){ return '<pre class="prompt">'+highlightVars(e.text)+"</pre>"; });
+    bindEditorInputs(p);
+  }
+
+  // -- knowledge view --
+
+  function renderDomain(name){
+    var d = lib.domains.filter(function(x){ return x.name === name; })[0];
+    if(!d){ ws.innerHTML = '<p class="empty">Knowledge base not found.</p>'; return; }
+    ws.innerHTML = head(name.replace(/_/g, " "), "analyze", "KNOWLEDGE BASE", "src/science_agent/knowledge/"+name+".yaml") +
+      '<p class="ws-desc">'+esc(d.description)+" Each limit lists the assumptions it rests on and the legitimate techniques that get “beyond” it by relaxing exactly one of them. Stage 1 sees the names, stage 3 sees everything.</p>" +
+      '<input class="filter-input" id="limitFilter" placeholder="Filter '+d.limits.length+' limits…" autocomplete="off">' +
+      '<div class="flow-steps" id="limitList"></div>';
+    function draw(q){
+      q = (q || "").toLowerCase();
+      var shown = d.limits.filter(function(l){ return !q || JSON.stringify(l).toLowerCase().indexOf(q) !== -1; });
+      $("limitList").innerHTML = shown.map(limitCard).join("") || '<p class="empty">No match.</p>';
+    }
+    $("limitFilter").addEventListener("input", function(){ draw(this.value); });
+    draw("");
+  }
+  function limitCard(l){
+    function sec(title, items){ return items && items.length ? '<div class="sec">'+title+"</div>"+list(items.map(esc)) : ""; }
+    var known = { id:1, name:1, statement:1, formula:1, assumptions:1, legitimate_workarounds:1, common_misconceptions:1, reference:1 };
+    var extra = Object.keys(l).filter(function(k){ return !known[k]; }).map(function(k){
+      return '<div class="sec">'+esc(k.replace(/_/g, " "))+"</div><p>"+esc(typeof l[k] === "string" ? l[k] : JSON.stringify(l[k]))+"</p>";
+    }).join("");
+    return '<div class="limit-card"><h4>'+esc(l.name || l.id)+"</h4>" +
+      (l.statement ? "<p>"+esc(l.statement)+"</p>" : "") +
+      (l.formula ? '<span class="formula">'+esc(l.formula)+"</span>" : "") +
+      sec("Rests on", l.assumptions) + sec("Legitimate workarounds", l.legitimate_workarounds) +
+      sec("Common misconceptions", l.common_misconceptions) + extra +
+      (l.reference ? '<p class="hint">'+esc(l.reference)+"</p>" : "") + "</div>";
+  }
+
+  // -- skill view --
+
+  function renderSkill(key){
+    var s = findEntry(key);
+    if(!s){ ws.innerHTML = '<p class="empty">Not found.</p>'; return; }
+    ws.innerHTML = head(s.title, "guard", s.kind === "skill" ? "SKILL" : "SUBAGENT", s.file) +
+      '<div class="info-banner"><span class="i" aria-hidden="true">i</span><span>'+(s.kind === "skill"
+        ? "This runs inside Claude Code (type /"+esc(s.title)+" there), not in Pandora. It runs the same pipeline with the same prompts and knowledge base and writes reports in the same format, so results can be compared."
+        : "A Claude Code subagent used by the assess-idea skill. It runs inside Claude Code, not in Pandora.")+
+      " Edits here change the file Claude Code reads.</span></div>" +
+      versionedBody(s, function(e){
+        var rows = [["Name", e.title], ["Type", e.kind === "skill" ? "Claude Code skill" : "Claude Code subagent"],
+                    ["Description", e.description], ["Tools", e.tools]]
+          .filter(function(r){ return r[1]; })
+          .map(function(r){ return '<span class="k">'+esc(r[0])+"</span><span>"+esc(r[1])+"</span>"; }).join("");
+        return '<div class="kv">'+rows+"</div>"+
+          '<details class="collapse" open><summary>Instructions</summary><div class="md" style="margin-top:10px">'+renderMarkdown(e.body)+"</div></details>";
+      });
+    bindEditorInputs(s);
+  }
+
+  // -- benchmark view --
+
+  function renderBench(id){
+    var b = lib.benchmarks.filter(function(x){ return x.id === id; })[0];
+    if(!b){ ws.innerHTML = '<p class="empty">Not found.</p>'; return; }
+    var exp = b.acceptable.map(function(v){ var m = VERDICT[v]; return '<span class="chip" style="color:'+(m ? m.color : "inherit")+'">'+esc(m ? m.label : v)+"</span>"; }).join("");
+    ws.innerHTML = head(b.id.replace(/_/g, " "), "neutral", "BENCHMARK IDEA", b.file) +
+      '<p class="ws-desc">A calibration idea whose correct verdict is established. A useful agent rejects the wrong ideas and accepts the real ones.</p>' +
+      '<blockquote class="md" style="margin:0"><p>'+esc(b.idea)+"</p></blockquote>" +
+      '<div class="kv"><span class="k">Expected</span><span class="chips">'+exp+'</span><span class="k">Why</span><span>'+esc(b.why)+"</span></div>" +
+      '<div class="ws-actions"><button class="btn" id="useIdeaBtn" type="button">Assess this idea</button><span class="hint">Copies it into the run form. The expected verdict is not shown to the model.</span></div>';
+    $("useIdeaBtn").addEventListener("click", function(){
+      runForm.idea = b.idea; store("pandora_draft", b.idea);
+      if(b.domain && serverConfig.domains.indexOf(b.domain) !== -1) runForm.domain = b.domain;
+      select("run", "run");
+    });
+  }
+
+  // -- report view --
+
+  // All runs of the same idea, oldest first: the run history ("versions") of that idea.
+  function runsOfIdea(r){
+    if(!r.idea_key) return [r];
+    return reports.filter(function(x){ return x.idea_key === r.idea_key; })
+      .sort(function(x, y){ return (x.started_at+x.name) < (y.started_at+y.name) ? -1 : 1; });
+  }
+
+  function runMetaHtml(a){
+    var m = a.meta || {};
+    if(!m.llm){
+      var models = a.models ? Array.from(new Set(Object.values(a.models))).join(", ") : "";
+      return '<p class="hint">No run settings recorded (this run was made with the CLI or before run versioning).'+(models ? " Model: "+esc(models) : "")+"</p>";
+    }
+    var l = m.llm;
+    var rows = [
+      ["Model", l.model+(l.provider === "anthropic" ? " (Anthropic API)" : " @ "+(l.base_url || ""))],
+      ["Settings", "temperature "+l.temperature+" · max tokens "+l.max_tokens+" · JSON mode "+(l.json_mode ? "on" : "off")+(l.effort ? " · effort "+l.effort : "")],
+      ["Knowledge & tools", m.domain+" · literature "+(m.literature ? "on" : "off")+" · compute "+(m.compute ? "on" : "off")]
+    ];
+    if(m.stage_overrides && Object.keys(m.stage_overrides).length)
+      rows.push(["Stage overrides", Object.keys(m.stage_overrides).map(function(s){ return s+" → "+(m.stage_overrides[s].model || "…"); }).join(", ")]);
+    var html = rows.map(function(r){ return '<span class="k">'+esc(r[0])+"</span><span>"+esc(r[1])+"</span>"; }).join("");
+    if(m.prompt_versions){
+      var chips = Object.keys(m.prompt_versions).map(function(name){
+        var pv = m.prompt_versions[name], e = findEntry("prompt:"+name);
+        var label = pv.version ? name+" v"+pv.version : name+" #"+pv.hash.slice(0,6);
+        var changed = !!(e && pv.version && e.active !== pv.version);
+        var title = pv.version ? "Version "+pv.version+(changed ? " (no longer the active version)" : " (still active)") : "Unversioned text, hash "+pv.hash;
+        return '<button class="chip-btn'+(changed ? " changed" : "")+'" type="button" data-act="open-prompt" data-name="'+esc(name)+'"'+(pv.version ? ' data-n="'+pv.version+'"' : "")+' title="'+esc(title)+'">'+esc(label)+"</button>";
+      }).join(" ");
+      html += '<span class="k">Prompt versions</span><span class="chips">'+chips+"</span>";
+    }
+    return '<div class="kv">'+html+"</div>";
+  }
+
+  async function renderReport(name){
+    ws.innerHTML = '<p class="empty">loading report…</p>';
+    try{
+      var r = await api("GET", "/api/reports/"+encodeURIComponent(name));
+      if(active.type !== "report" || active.id !== name) return;
+      var a = r.assessment || {};
+      var md = r.markdown.replace(/^# Idea assessment\s*\n/, "");
+      var me = reports.filter(function(x){ return x.name === name; })[0];
+      var hist = me ? runsOfIdea(me) : [];
+      var histHtml = hist.length > 1 ? '<div class="section-title">All runs of this idea</div><ul class="version-list">'+hist.map(function(x, i){
+        var v = VERDICT[x.verdict], mdl = x.meta && x.meta.llm ? x.meta.llm.model : Array.from(new Set(Object.values(x.models || {}))).join(", ");
+        return '<li class="'+(x.name === name ? "current" : "clickable")+'"'+(x.name === name ? "" : ' data-act="open-report" data-name="'+esc(x.name)+'"')+'>'+
+          '<span class="vn">run '+(i+1)+'</span><span class="vdate">'+esc(fmtDate(x.started_at))+"</span>"+
+          '<span class="vnote">'+(v ? '<strong style="color:'+v.color+'">'+esc(v.label)+"</strong>" : "—")+(x.confidence != null ? " · "+Math.round(x.confidence*100)+"%" : "")+
+          (mdl ? ' <span class="dim">· '+esc(mdl)+"</span>" : "")+"</span></li>";
+      }).join("")+"</ul>" : "";
+      ws.innerHTML = head(hist.length > 1 ? "Run "+(hist.indexOf(me)+1)+" of "+hist.length : "Report", "create", "RUN", name+".md") +
+        (a.idea ? '<blockquote class="md" style="margin:0"><p>'+esc(a.idea)+"</p></blockquote>" : "") +
+        (a.verdict ? verdictCard(a.verdict) : "") +
+        '<div class="section-title">Run settings</div>' + runMetaHtml(a) +
+        histHtml +
+        '<div class="ws-actions"><button class="btn secondary small" id="dlMd" type="button">Download Markdown</button>' +
+        '<button class="btn secondary small" id="exRunBtn" type="button">Export run (JSON)</button>' +
+        (a.idea ? '<button class="btn secondary small" id="rerunBtn" type="button">Assess again</button>' : "") + "</div>" +
+        '<details class="collapse"><summary>Full report</summary><div class="md" style="margin-top:10px">'+renderMarkdown(md)+"</div></details>";
+      $("dlMd").addEventListener("click", function(){ downloadText(name+".md", r.markdown); });
+      $("exRunBtn").addEventListener("click", async function(){
+        try{
+          var bundle = await api("POST", "/api/export", { runs:[name], versions:true });
+          downloadText("pandora-run-"+name+".json", JSON.stringify(bundle, null, 2), "application/json");
+        }catch(err){ alert(err.message); }
+      });
+      if($("rerunBtn")) $("rerunBtn").addEventListener("click", function(){ runForm.idea = a.idea; store("pandora_draft", a.idea); select("run", "run"); });
+    }catch(e){
+      ws.innerHTML = '<div class="error-box">'+esc(e.message)+"</div>";
+    }
+  }
+
+  // ---------------------------------------------------------------- export / import
+
+  $("exportBtn").addEventListener("click", async function(){
+    var btn = this; btn.disabled = true;
+    try{
+      var bundle = await api("POST", "/api/export", { runs: $("exRuns").checked ? "all" : [], versions: $("exVersions").checked });
+      if($("exSettings").checked){
+        readSettingsForm();
+        var s = JSON.parse(JSON.stringify(settings));
+        if(!$("exKeys").checked){ s.keys = {}; s.s2_api_key = ""; }
+        bundle.settings = s;
+      }
+      var d = new Date();
+      downloadText("pandora-export-"+d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+".json", JSON.stringify(bundle, null, 2), "application/json");
+      showImportNote("exported "+plural(bundle.runs.length, "run")+", "+plural(Object.keys(bundle.versions.items || {}).length, "versioned file"), false);
+    }catch(e){ showImportNote("Export failed: "+e.message, true); }
+    btn.disabled = false;
+  });
+  $("importBtn").addEventListener("click", function(){ $("importFile").click(); });
+  $("importFile").addEventListener("change", async function(){
+    var file = this.files[0]; this.value = "";
+    if(!file) return;
+    try{
+      var bundle = JSON.parse(await file.text());
+      var res = await api("POST", "/api/import", bundle);
+      var parts = [plural(res.runs_added, "run")+" added", plural(res.versions_added, "version")+" added"];
+      if(res.runs_skipped) parts.push(res.runs_skipped+" already present");
+      if(bundle.settings && confirm("The file also contains connection settings. Apply them in this browser?")){
+        var keep = settings.keys || {}, keepS2 = settings.s2_api_key;
+        settings = Object.assign({}, settings, bundle.settings);
+        settings.keys = Object.assign({}, keep, bundle.settings.keys || {});
+        if(!settings.s2_api_key) settings.s2_api_key = keepS2;
+        saveSettings(); fillSettingsForm(); parts.push("settings applied");
+      }
+      lib = await api("GET", "/api/library");
+      await loadReports();
+      renderRack(); renderWorkspace();
+      showImportNote("Imported: "+parts.join(", "), false);
+    }catch(e){ showImportNote("Import failed: "+e.message, true); }
+  });
+  function showImportNote(text, bad){
+    var n = $("importNote");
+    n.textContent = text; n.className = "save-note"+(bad ? " bad" : ""); n.hidden = false;
+    clearTimeout(showImportNote.t); showImportNote.t = setTimeout(function(){ n.hidden = true; }, 6000);
+  }
+
+  // ---------------------------------------------------------------- trace
+
+  var traceLog = $("traceLog");
+  function clearTrace(){ traceLog.innerHTML = ""; }
+  $("clearTraceBtn").addEventListener("click", clearTrace);
+
+  function addTrace(e){
+    var cls = "", text = "", detail = null;
+    switch(e.kind){
+      case "start":
+        cls = "now";
+        text = "Run started · "+e.model+(e.base_url && e.provider !== "anthropic" ? " @ "+e.base_url : " (Anthropic)")+" · "+e.domain+
+               " · literature "+(e.literature ? "on" : "off")+" · compute "+(e.compute ? "on" : "off");
+        if(e.prompt_versions) detail = "Prompt versions frozen for this run:\n" + Object.keys(e.prompt_versions).map(function(k){
+          var pv = e.prompt_versions[k]; return "  "+k+": "+(pv.version ? "v"+pv.version : "unversioned")+"  #"+pv.hash;
+        }).join("\n");
+        break;
+      case "stage": cls = "now"; text = "▶ "+(STAGE_META[e.stage] ? STAGE_META[e.stage].label : e.stage); break;
+      case "llm_request":
+        cls = "req"; text = "→ "+e.stage+": prompt sent to "+e.model+" ("+(e.system.length+e.prompt.length).toLocaleString()+" chars)";
+        detail = "SYSTEM\n" + e.system + "\n\nUSER\n" + e.prompt;
+        break;
+      case "llm_response":
+        cls = e.parsed ? "res" : "err";
+        text = "← "+e.stage+": reply after "+e.seconds+" s ("+e.response.length.toLocaleString()+" chars)"+(e.parsed ? "" : " · not valid JSON");
+        detail = e.response;
+        break;
+      case "info": text = e.message; break;
+      case "search_start": text = "search: "+e.queries.length+(e.queries.length === 1 ? " query" : " queries")+" on arXiv + Semantic Scholar"; detail = e.queries.join("\n"); break;
+      case "search_result":
+        text = "search: "+plural(e.count, "paper")+" found";
+        detail = e.papers.map(function(p){ return "- "+p.title+" ("+(p.year||"n.d.")+", "+p.source+")\n  "+p.url; }).join("\n");
+        break;
+      case "sandbox_start": text = "sandbox: running script ("+plural(e.code.split("\n").length, "line")+")"; detail = e.code; break;
+      case "sandbox_result":
+        cls = e.ok ? "res" : "err"; text = "sandbox: "+(e.ok ? "ok" : (e.timed_out ? "timed out" : "failed"));
+        detail = e.output + (e.result ? "\n\nRESULT_JSON " + JSON.stringify(e.result) : "");
+        break;
+      case "log": cls = "err"; text = e.level.toLowerCase()+": "+truncate(e.message, 160); detail = e.message.length > 160 ? e.message : null; break;
+      case "error": cls = "err"; text = "error: "+e.message; detail = e.traceback || null; break;
+      case "end": cls = e.status === "done" ? "now" : "err"; text = "Run "+(e.status === "done" ? "finished" : e.status); break;
+      default: text = e.kind;
+    }
+    var li = document.createElement("li");
+    if(cls) li.className = cls;
+    var t = document.createElement("span"); t.className = "t"; t.textContent = fmtClock(e.t);
+    var m = document.createElement("span"); m.className = "m";
+    if(detail){
+      var d = document.createElement("details");
+      var s = document.createElement("summary"); s.textContent = text;
+      var pre = document.createElement("pre"); pre.textContent = detail;
+      d.appendChild(s); d.appendChild(pre); m.appendChild(d);
+    } else {
+      m.textContent = text;
+    }
+    li.appendChild(t); li.appendChild(m);
+    var atBottom = traceLog.scrollHeight - traceLog.scrollTop - traceLog.clientHeight < 40;
+    traceLog.appendChild(li);
+    if(atBottom) traceLog.scrollTop = traceLog.scrollHeight;
+  }
+
+  // ---------------------------------------------------------------- init
+
+  window.addEventListener("beforeunload", function(ev){
+    var e = editor.open && findEntry(editor.key);
+    if(e && !sameText(editor.draft, e.text)){ ev.preventDefault(); ev.returnValue = ""; }
+  });
+
+  // #settings opens the settings; #<type>/<id> selects a library item (bookmarks, back/forward).
+  function routeFromHash(render){
+    var hash = location.hash.slice(1), slash = hash.indexOf("/");
+    if(hash === "settings"){ openSettings(true); return; }
+    var target = slash > 0 ? { type: hash.slice(0, slash), id: decodeURIComponent(hash.slice(slash+1)) } : { type:"run", id:"run" };
+    if(target.type === active.type && target.id === active.id) return;
+    if(render) select(target.type, target.id); else active = target;
+  }
+
+  async function loadReports(){
+    try{ reports = await api("GET", "/api/reports"); }catch(e){ reports = []; }
+  }
+
+  async function init(){
+    addTrace({ kind:"info", t: Date.now()/1000, message:"Ready. Pick “Assess an idea” on the left, or browse the prompts, knowledge base and skills." });
+    try{
+      var results = await Promise.all([api("GET", "/api/config"), api("GET", "/api/library"), loadReports(), api("GET", "/api/runs/current")]);
+      serverConfig = results[0]; lib = results[1];
+      if(!settings) settings = settingsFromConfig(serverConfig);
+      settings.keys = settings.keys || {};
+      fillSettingsForm();
+      $("configPath").textContent = serverConfig.config_file + (serverConfig.config_exists ? "" : " (not found, using built-in defaults)");
+      var current = results[3].run;
+      if(current){
+        run = { id: current.id, status: "running", events: [], result: null, error: null };
+        runForm.idea = current.idea;
+        startPolling();
+      }
+      routeFromHash(false);
+      renderRack(); renderWorkspace();
+      window.addEventListener("hashchange", function(){ routeFromHash(true); });
+      if(!current) checkConnection();
+    }catch(e){
+      setStatus("err", "Pandora server not reachable");
+      ws.innerHTML = '<div class="error-box">Cannot reach the Pandora server: '+esc(e.message)+"\n\nStart it with:  .venv\\Scripts\\pandora</div>";
+    }
+  }
+  init();
+})();
+</script>
+</body>
+</html>

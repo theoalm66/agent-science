@@ -96,6 +96,45 @@ science-agent limits information_theory                   # print the knowledge 
 Each run writes `reports/<date>-<slug>.md` (readable report) and a `.json` trace with every
 stage's output.
 
+## Pandora web UI
+
+```bash
+pandora                 # or double-click Pandora.cmd on Windows; opens http://127.0.0.1:8765/
+pandora --port 9000 --no-browser
+```
+
+A local web app on top of the same pipeline:
+
+- **Settings (⚙):** presets for vLLM, LM Studio, Ollama, the Anthropic API or any
+  OpenAI-compatible endpoint; endpoint URL, API key, model (loaded from the endpoint),
+  temperature, token limit, JSON mode and a Semantic Scholar key. Defaults come from
+  `config.yaml`; changes and keys stay in the browser (localStorage) and are passed to the
+  server per run, in memory only. Per-stage overrides in `config.yaml` still apply.
+- **Assess an idea:** starts a run and shows each stage live as it completes, then the verdict
+  and the saved report.
+- **Agent trace:** every model call with the exact prompt sent and the raw reply, the literature
+  search and the sandboxed Python script with its output.
+- **Library:** the stage prompts (with their `$variables` explained), the domain knowledge
+  bases, the Claude Code skill and subagents, the benchmark ideas (one click copies one into the
+  run form) and all past runs.
+- **Versioned prompts and skills:** edit any stage prompt, skill or subagent in the browser.
+  Saving creates a new version and writes the file, so the CLI, Claude Code and Pandora always
+  use the same text; the history (in `pandora-data/versions.json`, git-ignored) keeps every
+  earlier text with a note, and any version can be viewed, compared (line diff) or re-activated.
+  The editor checks that a stage prompt keeps its `# Stage:` line and warns about removed or
+  unknown `$variables`. A file changed outside Pandora shows up as an unversioned change and is
+  kept as a version before anything replaces it.
+- **Run history:** each run freezes the prompts at its start and records the model, endpoint,
+  settings and prompt versions in its JSON (`meta`). Repeated runs of the same idea are kept
+  side by side (`-2`, `-3`, ...) and listed as run 1, 2, ... of that idea.
+- **Export/import (⚙ → Backup & transfer):** one JSON file with runs, prompt/skill versions and
+  the connection settings (API keys only if you tick the box). Import merges: duplicates are
+  skipped, nothing is overwritten, and imported versions join the history without being
+  activated. A single run can be exported from its report view.
+
+It binds to 127.0.0.1. `--host 0.0.0.0` makes it reachable from your network, but anyone who can
+reach it can then make this machine run LLM-written Python (see the safety note below).
+
 ## Calibration benchmark
 
 `benchmarks/information_theory.yaml` holds 12 ideas with established answers: 7 that are wrong

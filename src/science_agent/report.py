@@ -108,8 +108,13 @@ def slugify(text: str, max_len: int = 50) -> str:
 
 
 def save(a: Assessment, output_dir: Path) -> Path:
+    """Write <date>-<slug>.md and .json; a repeated run of the same idea gets -2, -3, ... instead of overwriting."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{a.started_at[:10]}-{slugify(a.idea)}"
+    base = f"{a.started_at[:10]}-{slugify(a.idea)}"
+    stem, n = base, 1
+    while (output_dir / f"{stem}.md").exists() or (output_dir / f"{stem}.json").exists():
+        n += 1
+        stem = f"{base}-{n}"
     md_path = output_dir / f"{stem}.md"
     md_path.write_text(render_markdown(a), encoding="utf-8")
     (output_dir / f"{stem}.json").write_text(
