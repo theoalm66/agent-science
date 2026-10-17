@@ -1,0 +1,85 @@
+import json
+
+import pytest
+
+from science_agent.config import STAGES
+from science_agent.pipeline import Pipeline, StageError
+from science_agent.report import render_markdown, save
+from science_agent.tools.sandbox import RunResult
+
+from .conftest import CANNED, ScriptedLLM
+
+
+def test_full_run_produces_verdict_and_report(offline_config, scripted, tmp_path):
+    llm, llms = scripted
+    a = Pipeline(offline_config, llms=llms).run("Beat Shannon with fractal modulation")
+
+    assert [stage for stage, _ in llm.calls] == ["formalize", "literature", "limits", "compute", "critic", "verdict"]
+    assert a.verdict.verdict == "wrong"
+    assert a.computation.ok and a.computation.result["value"] == pytest.approx(1e6 * 6.6582, rel=1e-3)
+    assert a.critique.objections[0].severity == "fatal"  # normalized from "Fatal"
+
+    # Later stages see the earlier stages' output.
+    verdict_prompt = llm.calls[-1][1]
+    assert "Converse theorem forbids it" in verdict_prompt and "succeeded" in verdict_prompt
+
+    path = save(a, tmp_path)
+    md = path.read_text()
+    assert "## Verdict: WRONG" in md and "Shannon-Hartley" in md
+    assert json.loads(path.with_suffix(".json").read_text())["verdict"]["verdict"] == "wrong"
+
+
+def test_invalid_json_is_retried_with_error_feedback(offline_config):
+    llm = ScriptedLLM({"verdict": ["I think it's wrong.", CANNED["verdict"]]})
+    a = Pipeline(offline_config, llms={s: llm for s in STAGES}).run("idea")
+    verdict_calls = [prompt for stage, prompt in llm.calls if stage == "verdict"]
+    assert len(verdict_calls) == 2
+    assert "YOUR PREVIOUS REPLY WAS INVALID" in verdict_calls[1]
+    assert a.verdict.verdict == "wrong"
+
+
+def test_stage_fails_after_repeated_invalid_output(offline_config):
+    llm = ScriptedLLM({"formalize": ["nope", "still nope"]})
+    with pytest.raises(StageError):
+        Pipeline(offline_config, llms={s: llm for s in STAGES}).run("idea")
+
+
+def test_underspecified_idea_stops_early(offline_config):
+    llm = ScriptedLLM({"formalize": {**CANNED["formalize"], "underspecified": True,
+                                     "clarifying_questions": ["Which channel?"]}})
+    a = Pipeline(offline_config, llms={s: llm for s in STAGES}).run("higher dimensions?")
+    assert a.verdict.verdict == "underspecified"
+    assert [s for s, _ in llm.calls] == ["formalize"]
+    assert "Which channel?" in render_markdown(a)
+
+
+def test_failed_script_is_retried_with_error(offline_config, scripted):
+    llm, llms = scripted
+    runs = iter([RunResult(False, "", "NameError: x", None), RunResult(True, "ok\nRESULT_JSON: {}", "", {})])
+    a = Pipeline(offline_config, llms=llms, sandbox=lambda code, t: next(runs)).run("idea")
+    compute_prompts = [p for s, p in llm.calls if s == "compute"]
+    assert len(compute_prompts) == 2 and "NameError: x" in compute_prompts[1]
+    assert a.computation.ok and a.computation.attempts == 2
+
+
+def test_compute_disabled_skips_stage(offline_config, scripted):
+    llm, llms = scripted
+    offline_config.compute.enabled = False
+    a = Pipeline(offline_config, llms=llms).run("idea")
+    assert a.computation is None
+    assert "compute" not in [s for s, _ in llm.calls]
+    assert "(no computation was run)" in llm.calls[-1][1]
+
+
+def test_literature_results_reach_prompt(offline_config, scripted):
+    from science_agent.tools.literature import Paper
+
+    class FakeSearch:
+        def search(self, queries):
+            return [Paper("Capacity of MIMO", "https://x", 1999, "abstract", "arxiv")]
+
+    llm, llms = scripted
+    offline_config.literature.enabled = True
+    a = Pipeline(offline_config, llms=llms, literature=FakeSearch()).run("idea")
+    lit_prompt = next(p for s, p in llm.calls if s == "literature")
+    assert "Capacity of MIMO" in lit_prompt and len(a.papers) == 1

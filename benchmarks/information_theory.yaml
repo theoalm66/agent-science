@@ -1,0 +1,94 @@
+# Calibration set: ideas whose correct verdict is established.
+# `acceptable` lists every verdict that counts as correct. Run with:
+#   science-agent bench benchmarks/information_theory.yaml
+# A useful agent must reject the "wrong" ideas AND accept the real ones;
+# an agent that calls everything wrong is as useless as one that calls everything promising.
+
+domain: information_theory
+ideas:
+  - id: recursive_compression
+    idea: >
+      A lossless compression algorithm that reduces any file by at least 10%,
+      so applying it repeatedly can shrink any file to a few bytes.
+    acceptable: [wrong]
+    why: Pigeonhole principle / source coding theorem; random data is incompressible.
+
+  - id: beat_awgn_modulation
+    idea: >
+      A new fractal modulation scheme that transmits 20% more bits per second
+      than B*log2(1+SNR) over a single-antenna AWGN channel with the same
+      bandwidth and transmit power.
+    acceptable: [wrong]
+    why: Converse of the channel coding theorem; no assumption is relaxed.
+
+  - id: feedback_capacity
+    idea: >
+      Adding a perfect, instantaneous feedback link from receiver to transmitter
+      increases the capacity of a discrete memoryless channel.
+    acceptable: [wrong]
+    why: Shannon 1956, feedback does not increase the capacity of a memoryless channel.
+
+  - id: oam_unlimited
+    idea: >
+      Orbital angular momentum (OAM) beams provide an unlimited number of
+      orthogonal channels, so a free-space link with fixed small apertures can
+      reach unlimited capacity by using more OAM modes.
+    acceptable: [wrong]
+    why: Spatial degrees of freedom are bounded by the aperture Fresnel-number product.
+
+  - id: entanglement_ftl
+    idea: >
+      Using entangled photon pairs, a sender can transmit bits instantaneously to a
+      distant receiver by choosing which measurement basis to apply locally.
+    acceptable: [wrong]
+    why: No-communication theorem.
+
+  - id: qudit_beyond_holevo
+    idea: >
+      Encoding information in the continuous phase of a single photon in a
+      d-dimensional mode space, without entanglement, lets each photon carry far
+      more than log2(d) bits of decodable information.
+    acceptable: [wrong]
+    why: Holevo bound.
+
+  - id: landauer_violation
+    idea: >
+      A nanomagnetic memory that erases one bit at room temperature (300 K) while
+      dissipating on average only 0.1 k_B T of heat, using standard irreversible reset.
+    acceptable: [wrong]
+    why: Landauer's principle, erasure costs at least k_B T ln 2 (~0.69 k_B T).
+
+  - id: mimo_scaling
+    idea: >
+      Using N transmit and N receive antennas in a rich-scattering environment,
+      capacity at high SNR grows roughly N-fold compared to a single antenna link.
+    acceptable: [known]
+    why: Foschini 1998, Telatar 1999.
+
+  - id: superdense_coding
+    idea: >
+      If sender and receiver share entangled qubit pairs in advance, the sender can
+      transmit two classical bits by sending only one qubit.
+    acceptable: [known]
+    why: Superdense coding, Bennett and Wiesner 1992.
+
+  - id: polarization_multiplexing
+    idea: >
+      Transmitting independent data streams on two orthogonal polarizations of the
+      same optical fibre can roughly double the data rate.
+    acceptable: [known]
+    why: Polarization-division multiplexing, standard in coherent optical systems.
+
+  - id: semantic_communication
+    idea: >
+      If sender and receiver share a large knowledge base, transmitting task-relevant
+      meaning instead of raw bits can reduce the data rate needed for a given task.
+    acceptable: [known, plausible_but_hard]
+    why: Semantic / goal-oriented communication; consistent with side-information results.
+
+  - id: fiber_nonlinearity_compensation
+    idea: >
+      Compensating Kerr nonlinearity in optical fibre at the receiver can push
+      achievable rates above the peak predicted by the Gaussian-noise model.
+    acceptable: [known, plausible_but_hard]
+    why: Digital back-propagation and related techniques; the GN-model peak is not a capacity bound.

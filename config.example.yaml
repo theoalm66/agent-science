@@ -1,0 +1,40 @@
+# Copy to config.yaml (git-ignored) and adjust.
+# Any server speaking the OpenAI chat-completions protocol works:
+# Ollama, LM Studio, vLLM, llama.cpp server, OpenRouter, OpenAI, ...
+
+llm:
+  provider: openai_compatible        # openai_compatible | anthropic
+  base_url: http://localhost:11434/v1  # Ollama default
+  model: qwen3:32b
+  api_key_env: null                  # name of env var holding the key, e.g. OPENROUTER_API_KEY
+  temperature: 0.2                   # ignored by the anthropic provider
+  max_tokens: 8192
+  timeout: 600                       # seconds; local models can be slow
+  json_mode: false                   # set true if your server supports response_format=json_object
+
+# Example: Anthropic backend (pip install -e ".[anthropic]", uses ANTHROPIC_API_KEY)
+# llm:
+#   provider: anthropic
+#   model: claude-opus-5-5
+#   effort: high
+
+# Optional per-stage overrides, merged over `llm`. A stronger critic is the
+# single most effective upgrade when running a small local model.
+stages: {}
+#  critic:
+#    provider: anthropic
+#    model: claude-opus-5-5
+
+domain: information_theory           # knowledge base in src/science_agent/knowledge/
+
+literature:
+  enabled: true
+  max_results: 5                     # per query and per source
+  semantic_scholar_api_key_env: S2_API_KEY   # optional, raises rate limits
+
+compute:
+  enabled: true
+  timeout: 60                        # seconds per script
+  max_attempts: 2                    # retries with the error fed back
+
+output_dir: reports

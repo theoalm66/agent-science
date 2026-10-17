@@ -1,0 +1,217 @@
+# Known limits for information theory and communication physics.
+# Each entry says what the limit is, which assumptions it rests on, and which
+# legitimate techniques get "beyond" it by relaxing exactly one assumption.
+# An idea that relaxes no assumption cannot beat the limit.
+
+domain: information_theory
+description: Classical and quantum information theory, communication channels, physical limits of signalling and computation.
+
+limits:
+  - id: shannon_hartley
+    name: Shannon-Hartley capacity of the AWGN channel
+    statement: >
+      The maximum reliable rate over a band-limited channel with additive white
+      Gaussian noise is C = B log2(1 + S/N) bit/s. No modulation or coding
+      scheme exceeds it with vanishing error probability (converse of the
+      channel coding theorem).
+    formula: "C = B * log2(1 + P / (N0 * B))"
+    assumptions:
+      - single transmit and single receive spatial mode (SISO)
+      - fixed bandwidth B and average transmit power P
+      - additive white Gaussian noise, independent of the signal
+      - classical encoding, no pre-shared entanglement
+      - linear, memoryless channel
+    legitimate_workarounds:
+      - "More spatial modes: MIMO, spatial/mode-division multiplexing (relaxes SISO)"
+      - "Polarization multiplexing: two orthogonal polarizations = 2 modes (relaxes SISO)"
+      - "More bandwidth or more power (trivially changes B or S/N)"
+      - "Pre-shared entanglement: superdense coding (relaxes classical encoding)"
+      - "Non-Gaussian or signal-dependent noise has its own (different) capacity"
+    common_misconceptions:
+      - "A cleverer modulation (more constellation points, chaotic, fractal, analog) can beat it on the same AWGN channel"
+      - "Infinite-precision analog amplitudes carry infinite information (noise limits resolvable levels)"
+      - "Error-correcting codes can push rate above C (they only approach C)"
+    reference: "C. E. Shannon, A Mathematical Theory of Communication, 1948"
+
+  - id: shannon_limit_ebn0
+    name: Ultimate Shannon limit on Eb/N0
+    statement: >
+      As bandwidth grows without bound, reliable communication over AWGN
+      requires Eb/N0 >= ln 2, i.e. about -1.59 dB. No scheme works below it.
+    formula: "Eb/N0 >= ln(2) ~= 0.693 (-1.59 dB)"
+    assumptions:
+      - AWGN channel, classical receiver
+    legitimate_workarounds: []
+    common_misconceptions:
+      - "A new code achieves reliable transmission below -1.59 dB"
+    reference: "Shannon 1949; standard textbook result"
+
+  - id: channel_coding_converse
+    name: Channel coding theorem and its converse
+    statement: >
+      For any discrete memoryless channel there is a capacity C = max I(X;Y).
+      Rates below C are achievable with arbitrarily small error; rates above C
+      are not, whatever the coding scheme.
+    formula: "C = max_{p(x)} I(X;Y)"
+    assumptions:
+      - memoryless channel, known statistics
+    legitimate_workarounds:
+      - "Channels with memory or state have their own capacity formulas"
+    common_misconceptions:
+      - "Feedback increases the capacity of a memoryless channel (it does not; it only simplifies coding and improves error exponents)"
+    reference: "Shannon 1948; Shannon 1956 (feedback)"
+
+  - id: source_coding
+    name: Source coding theorem (lossless compression limit)
+    statement: >
+      A source with entropy H bits/symbol cannot be losslessly compressed below
+      H bits/symbol on average. By counting (pigeonhole), no lossless
+      compressor shrinks all inputs; uniformly random data is incompressible.
+    formula: "L_avg >= H(X)"
+    assumptions:
+      - lossless reconstruction required
+    legitimate_workarounds:
+      - "Lossy compression trades rate for distortion (rate-distortion theory)"
+      - "Side information at the decoder (Slepian-Wolf, Wyner-Ziv) lowers the required rate"
+    common_misconceptions:
+      - "A compressor can shrink any file, or compress its own output again and again"
+    reference: "Shannon 1948; Cover & Thomas, Elements of Information Theory, ch. 5"
+
+  - id: data_processing
+    name: Data processing inequality
+    statement: >
+      If X -> Y -> Z is a Markov chain, I(X;Z) <= I(X;Y). Post-processing at the
+      receiver cannot create information about the source.
+    formula: "I(X;Z) <= I(X;Y)"
+    assumptions:
+      - Z depends on X only through Y
+    legitimate_workarounds: []
+    common_misconceptions:
+      - "AI/ML post-processing recovers information the channel destroyed"
+    reference: "Cover & Thomas, ch. 2"
+
+  - id: nyquist
+    name: Nyquist signalling rate and sampling theorem
+    statement: >
+      A channel of bandwidth B supports at most 2B independent real symbols per
+      second (2BT degrees of freedom in time T). Faster-than-Nyquist signalling
+      introduces inter-symbol interference; it does not raise capacity beyond
+      Shannon-Hartley.
+    formula: "symbols/s <= 2B (real) ; degrees of freedom ~= 2BT"
+    assumptions:
+      - strictly band-limited signals
+    legitimate_workarounds:
+      - "Faster-than-Nyquist signalling can improve practical spectral efficiency of finite constellations, but never above C"
+    common_misconceptions:
+      - "Sending pulses faster than 2B gives proportionally more capacity"
+    reference: "Nyquist 1928; Landau-Pollak-Slepian 1960s"
+
+  - id: mimo_dof
+    name: MIMO capacity and degrees of freedom
+    statement: >
+      With Nt transmit and Nr receive antennas in rich scattering, capacity at
+      high SNR grows as min(Nt, Nr) log2(SNR). Gains come from independent
+      spatial channels and require a well-conditioned channel matrix.
+    formula: "C = log2 det(I + (SNR/Nt) H H^*) ; DoF = rank(H) <= min(Nt, Nr)"
+    assumptions:
+      - channel matrix rank sets the number of parallel streams
+    legitimate_workarounds: []
+    common_misconceptions:
+      - "Adding antennas always multiplies capacity, even in line-of-sight with small apertures"
+    reference: "Telatar 1999; Foschini & Gans 1998"
+
+  - id: spatial_dof_aperture
+    name: Spatial degrees of freedom of finite apertures (higher dimensions, OAM)
+    statement: >
+      The number of independent spatial modes linking two apertures of areas
+      A_t and A_r at distance d and wavelength lambda is about
+      N ~= A_t A_r / (lambda d)^2 (Fresnel number product), at least 1. Orbital
+      angular momentum (OAM) modes are one basis of this same mode space; they
+      add no capacity beyond what the apertures already allow.
+    formula: "N_modes ~= A_t * A_r / (lambda * d)^2"
+    assumptions:
+      - far field or paraxial propagation, finite apertures
+    legitimate_workarounds:
+      - "Short links or large apertures (high Fresnel number) give many modes"
+      - "Multimode/few-mode fibres guide many modes over long distances"
+    common_misconceptions:
+      - "OAM provides an unlimited number of orthogonal channels and unlimited capacity in free space"
+      - "Using 'higher dimensions' gives capacity beyond the physical mode count"
+    reference: "D. A. B. Miller, Communicating with waves between volumes, 2000; Edfors & Johansson, IEEE TAP 2012"
+
+  - id: holevo
+    name: Holevo bound
+    statement: >
+      A quantum system of dimension d (e.g. one photon in d modes, a qudit)
+      carries at most log2(d) bits of accessible classical information, however
+      it is prepared and measured, without pre-shared entanglement.
+    formula: "I_accessible <= S(rho) <= log2(d)"
+    assumptions:
+      - no pre-shared entanglement between sender and receiver
+    legitimate_workarounds:
+      - "Superdense coding: with a pre-shared entangled pair, one qubit sent carries 2 bits (2 log2 d with qudits)"
+    common_misconceptions:
+      - "A qubit's continuous Bloch-sphere parameters can carry infinitely many bits"
+      - "High-dimensional photon encoding sends more than log2(d) bits per photon"
+    reference: "A. S. Holevo, 1973"
+
+  - id: no_communication
+    name: No-communication (no-signalling) theorem
+    statement: >
+      Local operations on one part of an entangled state do not change the
+      measurement statistics of the other part. Entanglement alone cannot
+      transmit information, so it cannot be used for faster-than-light signalling.
+    formula: "rho_B is unchanged by any local operation on A"
+    assumptions:
+      - standard quantum mechanics
+    legitimate_workarounds:
+      - "Quantum teleportation and superdense coding still need a classical or quantum channel"
+    common_misconceptions:
+      - "Entangled particles allow instantaneous communication"
+    reference: "Ghirardi, Rimini, Weber 1980; Peres & Terno 2004"
+
+  - id: landauer
+    name: Landauer limit
+    statement: >
+      Erasing one bit of information in an environment at temperature T
+      dissipates at least k_B T ln 2 of heat on average (~2.87e-21 J at 300 K).
+    formula: "E_erase >= k_B * T * ln(2)"
+    assumptions:
+      - logically irreversible operation (erasure)
+      - environment in thermal equilibrium at temperature T
+    legitimate_workarounds:
+      - "Reversible computing avoids erasure and so is not bound by it (in principle)"
+      - "Lower temperature lowers the bound"
+    common_misconceptions:
+      - "A device erases bits below k_B T ln 2 at room temperature on average"
+    reference: "R. Landauer, 1961; Berut et al., Nature 2012 (experimental confirmation)"
+
+  - id: bekenstein
+    name: Bekenstein bound
+    statement: >
+      A region of radius R containing energy E holds at most
+      I <= 2 pi R E / (hbar c ln 2) bits.
+    formula: "I <= 2*pi*R*E / (hbar*c*ln 2)"
+    assumptions:
+      - general relativity and quantum field theory
+    legitimate_workarounds: []
+    common_misconceptions:
+      - "Unlimited information can be stored in a finite physical object"
+    reference: "J. D. Bekenstein, 1981"
+
+  - id: nonlinear_fiber
+    name: Nonlinear fibre channel ("nonlinear Shannon limit")
+    statement: >
+      In optical fibre, the Kerr nonlinearity makes interference grow with
+      power, so achievable rates under common models peak and then fall as
+      power rises. This is a limit of the models and receivers used, not a
+      proven capacity; the true capacity of the nonlinear fibre channel is an
+      open problem.
+    formula: "SNR_eff = P / (N_ASE + eta * P^3)  (Gaussian-noise model)"
+    assumptions:
+      - Gaussian-noise model, nonlinear interference treated as noise
+    legitimate_workarounds:
+      - "Digital back-propagation, nonlinear Fourier transform, probabilistic shaping (active research)"
+    common_misconceptions:
+      - "The nonlinear Shannon limit is a proven capacity bound"
+    reference: "Essiambre et al., J. Lightwave Technol. 2010; Agrell et al., Roadmap 2016"
