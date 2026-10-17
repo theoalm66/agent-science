@@ -21,6 +21,15 @@ ideas:
     acceptable: [wrong]
     why: Converse of the channel coding theorem; no assumption is relaxed.
 
+  - id: awgn_numeric_overclaim
+    idea: >
+      Our receiver reaches 15.97 Mbit/s error-free over a single-antenna AWGN link with
+      1 MHz bandwidth at an SNR of 30 dB.
+    acceptable: [wrong]
+    why: >
+      C = 1e6 * log2(1001) ~= 9.97 Mbit/s. A concrete numeric claim must be checked, not
+      sent back as underspecified.
+
   - id: feedback_capacity
     idea: >
       Adding a perfect, instantaneous feedback link from receiver to transmitter
