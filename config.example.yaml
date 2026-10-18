@@ -38,3 +38,7 @@ compute:
   max_attempts: 2                    # retries with the error fed back
 
 output_dir: reports
+
+# Longest idea text accepted (characters). ~4 characters per token; the model context
+# window (e.g. vLLM --max-model-len) must hold the idea plus the prompt.
+max_idea_chars: 200000

@@ -38,7 +38,7 @@ from .bench import load_benchmark
 from .config import Config, LLMConfig, load_config
 from .jsonutil import JSONExtractionError, extract_json
 from .llm import LLM
-from .pipeline import Pipeline
+from .pipeline import Pipeline, check_idea_length
 from .report import render_markdown, save
 from .tools.literature import LiteratureSearch
 from .tools.sandbox import RunResult, run_python
@@ -331,9 +331,8 @@ class PandoraServer(ThreadingHTTPServer):
         idea = str(body.get("idea") or "").strip()
         if not idea:
             raise ValueError("The idea is empty")
-        if len(idea) > 20_000:
-            raise ValueError("The idea is longer than 20,000 characters")
         cfg, s2_key = self.run_config(body)
+        check_idea_length(idea, cfg.max_idea_chars)
         # Freeze the prompts now: activating another version mid-run must not mix versions.
         prompts, prompt_versions = self.store.snapshot_prompts()
         with self.lock:

@@ -43,6 +43,15 @@ class StageError(RuntimeError):
     pass
 
 
+def check_idea_length(idea: str, limit: int) -> None:
+    if len(idea) > limit:
+        raise ValueError(
+            f"The idea is {len(idea):,} characters long; the limit is {limit:,} "
+            "(max_idea_chars in config.yaml). At about 4 characters per token, the model's "
+            "context window must also fit it."
+        )
+
+
 def load_prompt(name: str) -> str:
     return (resources.files("science_agent") / "prompts" / f"{name}.md").read_text(encoding="utf-8")
 
@@ -166,6 +175,7 @@ class Pipeline:
     # -- stages ------------------------------------------------------------
 
     def run(self, idea: str) -> Assessment:
+        check_idea_length(idea.strip(), self.config.max_idea_chars)
         a = Assessment(
             idea=idea.strip(),
             domain=self.domain.get("domain", self.config.domain),

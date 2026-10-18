@@ -89,3 +89,13 @@ def test_literature_results_reach_prompt(offline_config, scripted):
     a = Pipeline(offline_config, llms=llms, literature=FakeSearch()).run("idea")
     lit_prompt = next(p for s, p in llm.calls if s == "literature")
     assert "Capacity of MIMO" in lit_prompt and len(a.papers) == 1
+
+
+def test_idea_length_limit_is_configurable(offline_config, scripted):
+    llm, llms = scripted
+    offline_config.max_idea_chars = 50
+    with pytest.raises(ValueError, match="max_idea_chars"):
+        Pipeline(offline_config, llms=llms).run("x" * 51)
+    assert llm.calls == []
+    offline_config.max_idea_chars = 30_000
+    assert Pipeline(offline_config, llms=llms).run("y" * 25_000).verdict.verdict == "wrong"

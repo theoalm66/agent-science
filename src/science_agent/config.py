@@ -50,6 +50,9 @@ class Config(BaseModel):
     literature: LiteratureConfig = Field(default_factory=LiteratureConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
     output_dir: Path = Path("reports")
+    # About 4 characters per token: 200k characters is ~50k tokens, which the model's
+    # context window (e.g. vLLM --max-model-len) must also hold next to the prompt.
+    max_idea_chars: int = 200_000
 
     def llm_for(self, stage: str) -> LLMConfig:
         """LLM settings for a stage: the base config with that stage's overrides applied."""
