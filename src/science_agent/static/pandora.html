@@ -812,10 +812,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     $("litInput").addEventListener("change", function(){ runForm.literature = this.checked; });
     $("compInput").addEventListener("change", function(){ runForm.compute = this.checked; });
     $("runBtn").addEventListener("click", function(){ startRun(); });
-    document.querySelectorAll(".ans-input").forEach(function(t){
-      t.addEventListener("input", function(){ answerDraft[t.dataset.i] = t.value; });
-    });
-    if($("answerRunBtn")) $("answerRunBtn").addEventListener("click", answerAndRerun);
+    if(run && run.result) wireClarify(run.result.assessment, run.id);
     if($("cancelBtn")) $("cancelBtn").addEventListener("click", cancelRun);
     var openBtn = $("openReportBtn");
     if(openBtn) openBtn.addEventListener("click", function(){ select("report", run.result.report); });
@@ -955,12 +952,23 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       '<div class="ws-actions"><button class="btn" id="answerRunBtn" type="button">Answer &amp; re-run</button></div></div>';
   }
 
-  function answerAndRerun(){
-    var a = run.result.assessment, qs = (a.formalization || {}).clarifying_questions || [];
+  // a: the assessment whose questions were answered; parentId: the run it came from.
+  function answerAndRerun(a, parentId){
+    if(run && run.status === "running"){ flashNote("A run is already in progress", true); return; }
+    var qs = (a.formalization || {}).clarifying_questions || [];
     var fresh = qs.map(function(q, i){ return { question: q, answer: (answerDraft[i] || "").trim() }; })
                   .filter(function(c){ return c.answer; });
     if(!fresh.length){ flashNote("Answer at least one question", true); return; }
-    startRun({ idea: a.idea, clarifications: (a.clarifications || []).concat(fresh), parent_run: run.id });
+    var opts = { idea: a.idea, clarifications: (a.clarifications || []).concat(fresh), parent_run: parentId };
+    if(active.type !== "run") select("run", "run");
+    startRun(opts);
+  }
+
+  function wireClarify(a, parentId){
+    document.querySelectorAll(".ans-input").forEach(function(t){
+      t.addEventListener("input", function(){ answerDraft[t.dataset.i] = t.value; });
+    });
+    if($("answerRunBtn")) $("answerRunBtn").addEventListener("click", function(){ answerAndRerun(a, parentId); });
   }
 
   function renderResult(){
@@ -1398,6 +1406,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       var r = await api("GET", "/api/reports/"+encodeURIComponent(name));
       if(active.type !== "report" || active.id !== name) return;
       var a = r.assessment || {};
+      answerDraft = {};
       var md = r.markdown.replace(/^# Idea assessment\s*\n/, "");
       var me = reports.filter(function(x){ return x.name === name; })[0];
       var hist = me ? runsOfIdea(me) : [];
@@ -1410,13 +1419,15 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       }).join("")+"</ul>" : "";
       ws.innerHTML = head(hist.length > 1 ? "Run "+(hist.indexOf(me)+1)+" of "+hist.length : "Report", "create", "RUN", name+".md") +
         (a.idea ? '<blockquote class="md" style="margin:0"><p>'+esc(a.idea)+"</p></blockquote>" : "") +
-        (a.verdict ? verdictCard(a.verdict) : "") +
+        (a.clarifications && a.clarifications.length ? '<p class="hint">This run included your answers to '+plural(a.clarifications.length, "clarifying question")+".</p>" : "") +
+        (a.verdict ? verdictCard(a.verdict) : "") + clarifyPanel(a) +
         '<div class="section-title">Run settings</div>' + runMetaHtml(a) +
         histHtml +
         '<div class="ws-actions"><button class="btn secondary small" id="dlMd" type="button">Download Markdown</button>' +
         '<button class="btn secondary small" id="exRunBtn" type="button">Export run (JSON)</button>' +
         (a.idea ? '<button class="btn secondary small" id="rerunBtn" type="button">Assess again</button>' : "") + "</div>" +
         '<details class="collapse"><summary>Full report</summary><div class="md" style="margin-top:10px">'+renderMarkdown(md)+"</div></details>";
+      wireClarify(a, (a.meta && a.meta.run_id) || name);
       $("dlMd").addEventListener("click", function(){ downloadText(name+".md", r.markdown); });
       $("exRunBtn").addEventListener("click", async function(){
         try{
