@@ -31,6 +31,16 @@ ideas:
       was measured is legitimate (research mode); judging it wrong against the stated setup is too.
       Calling it known or promising is not.
 
+  - id: bandwidth_doubling_derivation
+    idea: >
+      Derivation: (1) C = B log2(1 + P/N). (2) The transmit power P and the noise power N stay
+      the same when we widen the band. (3) Hence doubling the bandwidth B doubles the capacity C,
+      and C grows without bound as B -> infinity at fixed transmit power.
+    acceptable: [wrong]
+    why: >
+      Step (2) is wrong: noise power is N = N0*B, so SNR falls as B grows; C approaches
+      (P/N0) log2(e) as B -> infinity. Checks that a flawed derivation step is found.
+
   - id: feedback_capacity
     idea: >
       Adding a perfect, instantaneous feedback link from receiver to transmitter

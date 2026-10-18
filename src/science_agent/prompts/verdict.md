@@ -1,10 +1,13 @@
 # Stage: verdict
 
 Give the final triage verdict, weighing all evidence below. The critic may be wrong too;
-judge on the merits.
+judge on the merits. Judge the original text, not only its restatement.
 
-CLAIM:
+CLAIM (stage 1's restatement):
 $claim
+
+ORIGINAL TEXT (exactly as the author submitted it):
+$original
 
 LITERATURE: $literature
 

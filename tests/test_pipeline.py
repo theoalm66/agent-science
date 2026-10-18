@@ -99,3 +99,17 @@ def test_idea_length_limit_is_configurable(offline_config, scripted):
     assert llm.calls == []
     offline_config.max_idea_chars = 30_000
     assert Pipeline(offline_config, llms=llms).run("y" * 25_000).verdict.verdict == "wrong"
+
+
+def test_long_sources_reach_the_stages_that_check_them(offline_config, scripted):
+    llm, llms = scripted
+    original = "Derivation:\n(1) C = B log2(1 + S/N)\n(2) therefore C = 2 B log2(S/N)  <- wrong step\n" + "detail " * 500
+    Pipeline(offline_config, llms=llms).run(original)
+    prompts = {stage: prompt for stage, prompt in llm.calls}
+    # Verbatim key content goes to the analysis stages ...
+    for stage in ("limits", "compute"):
+        assert "- C = B log2(1 + S/N)" in prompts[stage]
+    # ... and the judges read the full original text, not just the one-line claim.
+    for stage in ("critic", "verdict"):
+        assert "therefore C = 2 B log2(S/N)  <- wrong step" in prompts[stage]
+        assert prompts[stage].count("detail") >= 500

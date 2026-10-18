@@ -397,7 +397,9 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     previous_error:"empty, or on a retry the failing script and its error",
     literature:"the literature assessment as JSON",
     computation:"the script's status, result and output tail",
-    critique:"the critic's objections as JSON"
+    critique:"the critic's objections as JSON",
+    key_content:"verbatim equations, derivation steps, measured values and conclusions extracted in stage 1",
+    original:"the full original text exactly as submitted (critic and verdict)"
   };
 
   var VERDICT = {
@@ -865,6 +867,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       if(p.claim) h.push("<div>"+esc(p.claim)+"</div>");
       if(p.predicted_quantity) h.push('<div><span class="dim">Predicted quantity:</span> '+esc(p.predicted_quantity)+"</div>");
       if(p.assumptions && p.assumptions.length) h.push('<div class="dim">Assumptions:</div>'+list(p.assumptions.map(esc)));
+      if(p.key_content && p.key_content.length) h.push('<div class="dim">Key content ('+esc(p.input_type || "idea")+', verbatim):</div>'+list(p.key_content.map(esc)));
       if(p.clarifying_questions && p.clarifying_questions.length) h.push('<div class="dim">Clarifying questions:</div>'+list(p.clarifying_questions.map(esc)));
       if(p.established_view) h.push('<div><span class="dim">Established view (reference, not a judgement):</span> '+esc(p.established_view)+"</div>");
       if(p.what_must_be_true && p.what_must_be_true.length) h.push('<div class="dim">If the idea is correct, then:</div>'+list(p.what_must_be_true.map(esc)));
@@ -878,6 +881,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       if(p.violates_known_limit != null) h.push('<div><span class="tag '+(p.violates_known_limit ? "yes" : "no")+'">'+(p.violates_known_limit ? "violates a known limit" : "no violation found")+"</span></div>");
       if(p.applicable_limits && p.applicable_limits.length) h.push(list(p.applicable_limits.map(function(l){ return "<strong>"+esc(l.name)+"</strong>"+(l.implication ? ": "+esc(l.implication) : ""); })));
       if(p.relaxed_assumptions && p.relaxed_assumptions.length) h.push('<div><span class="dim">Relaxed assumptions:</span> '+esc(p.relaxed_assumptions.join("; "))+"</div>");
+      if(p.derivation_check && p.derivation_check.trim().toLowerCase() !== "n/a") h.push('<div><span class="dim">Derivation check:</span> '+esc(p.derivation_check)+"</div>");
       if(p.quantitative_question) h.push('<div><span class="dim">Decisive question:</span> '+esc(p.quantitative_question)+"</div>");
     } else if(name === "compute"){
       if(p.purpose) h.push("<div>"+esc(p.purpose)+"</div>");

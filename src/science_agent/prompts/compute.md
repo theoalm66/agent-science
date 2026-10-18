@@ -7,10 +7,14 @@ QUESTION: $question
 CONTEXT:
 Claim: $claim
 Relevant limits: $limits
+Key content of the source (verbatim):
+$key_content
 
 Requirements:
 - Python 3 standard library plus numpy, scipy, sympy only. No network, no files, no plots.
 - Use realistic, explicitly stated parameter values; print them.
+- If the question concerns a derivation or formula from the source, re-derive or check it
+  symbolically with sympy (e.g. simplify(lhs - rhs) == 0) and print which step holds or fails.
 - Finish within a few seconds.
 - The LAST line printed must be: RESULT_JSON: {...}
   with keys "quantity", "value", "unit", "comparison" (the claimed value vs the limit),

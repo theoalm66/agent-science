@@ -56,6 +56,12 @@ def load_prompt(name: str) -> str:
     return (resources.files("science_agent") / "prompts" / f"{name}.md").read_text(encoding="utf-8")
 
 
+def _render_key_content(f: Formalization) -> str:
+    if not f.key_content:
+        return "(none extracted; rely on the claim)"
+    return "\n".join(f"- {item}" for item in f.key_content)
+
+
 def _dump(model: BaseModel | None) -> str:
     if model is None:
         return "(stage skipped)"
@@ -221,6 +227,7 @@ class Pipeline:
             claim=f.claim,
             assumptions="; ".join(f.assumptions) or "(none stated)",
             predicted_quantity=f.predicted_quantity or "(not stated)",
+            key_content=_render_key_content(f),
             knowledge=knowledge.render_full(self.domain),
         ))
 
@@ -231,6 +238,7 @@ class Pipeline:
             "critic",
             Critique,
             claim=f.claim,
+            original=a.idea,
             literature=_dump(a.literature),
             limits=_dump(a.limits),
             computation=self._render_computation(a.computation),
@@ -240,6 +248,7 @@ class Pipeline:
             "verdict",
             VerdictResult,
             claim=f.claim,
+            original=a.idea,
             literature=_dump(a.literature),
             limits=_dump(a.limits),
             computation=self._render_computation(a.computation),
@@ -260,6 +269,7 @@ class Pipeline:
                     question=limits.quantitative_question,
                     claim=f.claim,
                     limits=limit_names,
+                    key_content=_render_key_content(f),
                     previous_error=previous_error,
                 )
             except StageError as e:

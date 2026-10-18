@@ -30,6 +30,8 @@ class Formalization(BaseModel):
     search_queries: list[str] = Field(default_factory=list)
     underspecified: bool = False
     clarifying_questions: list[str] = Field(default_factory=list)
+    input_type: str = "idea"
+    key_content: list[str] = Field(default_factory=list)
     established_view: str = ""
     what_must_be_true: list[str] = Field(default_factory=list)
 
@@ -64,6 +66,7 @@ class LimitsCheck(BaseModel):
     violates_known_limit: bool = False
     violation_explanation: str = ""
     dimensional_check: str = ""
+    derivation_check: str = ""
     quantitative_question: str = ""
 
 

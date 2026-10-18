@@ -18,6 +18,8 @@ CANNED = {
         "search_queries": ["AWGN channel capacity converse"],
         "underspecified": False,
         "clarifying_questions": [],
+        "input_type": "derivation",
+        "key_content": ["C = B log2(1 + S/N)", "S/N = 1000"],
     },
     "literature": {
         "established_field": "channel coding",

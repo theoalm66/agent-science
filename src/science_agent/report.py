@@ -43,6 +43,8 @@ def render_markdown(a: Assessment) -> str:
         out.append(f"{f.claim}\n")
         out.append(f"**Predicted quantity:** {f.predicted_quantity or '(not stated)'}\n")
         out.append(f"**Assumptions:**\n{_bullets(f.assumptions)}\n")
+        if f.key_content:
+            out.append(f"**Key content ({f.input_type}, verbatim):**\n{_bullets(f.key_content)}\n")
         if f.variables:
             out.append(f"**Variables:**\n{_bullets(f.variables)}\n")
         if f.clarifying_questions:
@@ -75,6 +77,8 @@ def render_markdown(a: Assessment) -> str:
             out.append(f"{lim.violation_explanation}\n")
         out.append(f"**Relaxed assumptions:**\n{_bullets(lim.relaxed_assumptions)}\n")
         out.append(f"**Dimensional check:** {lim.dimensional_check}\n")
+        if lim.derivation_check and lim.derivation_check.strip().lower() != "n/a":
+            out.append(f"**Derivation check:** {lim.derivation_check}\n")
 
     if a.computation:
         c = a.computation

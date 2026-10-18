@@ -39,8 +39,8 @@ it asks for (keep it in your working notes; you don't need to show the JSON to t
    Print the parameters and end with a `RESULT_JSON:` line. Fix and re-run once if it fails.
    Never report a number you did not compute or cite.
 
-5. **Critic** (`critic.md`): delegate to the `critic` subagent, passing the claim and your
-   literature, limits and computation results. It works in a fresh context so it is not
+5. **Critic** (`critic.md`): delegate to the `critic` subagent, passing the claim, the full
+   original text exactly as the user gave it, and your literature, limits and computation results. It works in a fresh context so it is not
    anchored on your reasoning. Take its objections seriously; also check it for errors.
 
 6. **Verdict** (`verdict.md`): choose exactly one of `wrong`, `known`, `plausible_but_hard`,

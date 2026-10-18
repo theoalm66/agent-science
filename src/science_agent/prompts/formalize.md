@@ -18,6 +18,11 @@ Rules (research mode: open to new results, but always state the established view
   judgement of the idea.
 - Always fill "what_must_be_true": if the idea or measurement is correct, which standard
   assumptions must fail or which effect must exist. This is where something new would be found.
+- The input may be a short idea, a hypothesis, a derivation, a measurement report or a whole
+  publication. Copy its decisive content VERBATIM into "key_content": central equations, every
+  step of a derivation in order, measured values with units and conditions, and the main
+  conclusions. Do not paraphrase, simplify or correct equations or numbers here; later stages
+  check exactly what the author wrote.
 - Search queries name concepts, not parameter values: "AWGN channel capacity bound", not
   "capacity at 30 dB SNR for 1 MHz".
 
@@ -32,6 +37,8 @@ Return JSON:
   "search_queries": ["3 to 5 short literature search queries using standard terminology"],
   "underspecified": <true or false>,
   "clarifying_questions": ["open points the author should clarify; fill this even when not underspecified"],
+  "input_type": "idea | hypothesis | derivation | measurement | publication",
+  "key_content": ["verbatim equations, derivation steps (in order), measured values with units, main conclusions"],
   "established_view": "what standard theory predicts here, with numbers, under its usual assumptions",
   "what_must_be_true": ["standard assumptions that must fail, or effects that must exist, if the idea is correct"]
 }

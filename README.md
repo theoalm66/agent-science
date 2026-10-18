@@ -137,8 +137,8 @@ reach it can then make this machine run LLM-written Python (see the safety note 
 
 ## Calibration benchmark
 
-`benchmarks/information_theory.yaml` holds 13 ideas with established answers: 8 that are wrong
-(e.g. a numeric rate above Shannon capacity, compressing any file, faster-than-light signalling
+`benchmarks/information_theory.yaml` holds 14 ideas with established answers: 9 that are wrong
+(e.g. a numeric rate above Shannon capacity, a derivation with a wrong step, compressing any file, faster-than-light signalling
 with entanglement, unlimited OAM capacity, beating the Holevo bound) and 5 that are real (MIMO, superdense coding, polarization multiplexing,
 semantic communication, fibre nonlinearity compensation).
 
