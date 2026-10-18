@@ -124,6 +124,10 @@ A local web app on top of the same pipeline:
   The editor checks that a stage prompt keeps its `# Stage:` line and warns about removed or
   unknown `$variables`. A file changed outside Pandora shows up as an unversioned change and is
   kept as a version before anything replaces it.
+- **Answering clarifying questions:** when stage 1 asks questions, the result shows one field per
+  question. **Answer & re-run** starts a new run of the same idea with your answers appended as
+  authoritative statements about the setup (earlier answers are carried along); the new run is
+  linked to the previous one (`meta.parent_run`) and listed under the same idea.
 - **Run history:** each run freezes the prompts at its start and records the model, endpoint,
   settings and prompt versions in its JSON (`meta`). Repeated runs of the same idea are kept
   side by side (`-2`, `-3`, ...) and listed as run 1, 2, ... of that idea.

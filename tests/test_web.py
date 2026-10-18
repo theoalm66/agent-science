@@ -209,3 +209,36 @@ def test_validates_input_and_unknown_reports(server):
     assert call(server, "POST", "/api/runs", {"idea": "  "})[0] == 400
     assert call(server, "POST", "/api/runs", {"idea": "x", "domain": "../../secrets"})[0] == 400
     assert call(server, "GET", "/api/reports/..%2Fconfig")[0] == 404
+
+
+def test_answers_to_clarifying_questions_rerun_the_idea(server):
+    first = run_idea(server)
+    status, res = call(server, "POST", "/api/runs", {
+        "idea": "A modulation that beats Shannon.",
+        "llm": {"model": "m"},
+        "parent_run": first["id"],
+        "clarifications": [
+            {"question": "Baseband or passband?", "answer": "Passband, 1 MHz wide."},
+            {"question": "Skipped question", "answer": "  "},
+        ],
+    })
+    assert status == 200, res
+    snap = wait_for_end(server, res["id"])
+    assert snap["status"] == "done", snap["error"]
+    a = snap["result"]["assessment"]
+    # Only answered questions are kept; the idea itself stays the original text.
+    assert a["clarifications"] == [{"question": "Baseband or passband?", "answer": "Passband, 1 MHz wide."}]
+    assert a["idea"] == "A modulation that beats Shannon."
+    assert a["meta"]["parent_run"] == first["id"]
+    prompts = {e["stage"]: e["prompt"] for e in snap["events"] if e["kind"] == "llm_request"}
+    for stage in ("formalize", "critic", "verdict"):
+        assert "A: Passband, 1 MHz wide." in prompts[stage]
+    assert "Skipped question" not in prompts["formalize"]
+    assert "Passband, 1 MHz wide." in snap["result"]["markdown"]
+    # Both runs belong to the same idea in the history.
+    _, reports = call(server, "GET", "/api/reports")
+    assert len({r["idea_key"] for r in reports}) == 1
+
+
+def test_rejects_malformed_clarifications(server):
+    assert call(server, "POST", "/api/runs", {"idea": "x", "clarifications": "nope"})[0] == 400

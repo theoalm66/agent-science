@@ -156,6 +156,10 @@ pre.prompt .h{color:var(--accent);font-weight:500}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;font-size:.9rem;line-height:1.5}
 .kv .k{font-family:var(--font-mono);font-size:.74rem;color:var(--fg-dim);padding-top:3px}
 @media (max-width:640px){.kv{grid-template-columns:1fr}}
+.clarify{margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--panel-2)}
+.clarify-title{font-weight:600;margin:0 0 4px}
+.clarify .field{margin-top:10px}
+.clarify textarea{min-height:56px}
 .error-box{border:1px solid var(--danger);color:var(--danger);border-radius:10px;padding:10px 12px;font-family:var(--font-mono);font-size:.82rem;white-space:pre-wrap;word-break:break-word}
 .empty{color:var(--fg-dim);font-size:.86rem;font-family:var(--font-mono)}
 
@@ -495,6 +499,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
   var active = { type:"run", id:"run" };
   var runForm = { idea: load("pandora_draft", ""), domain:null, literature:null, compute:null };
   var run = null;             // { id, status, events, result, error }
+  var answerDraft = {};       // clarifying-question index -> answer typed for the current result
   var pollTimer = null, tickTimer = null;
   var modelsCache = [];
 
@@ -806,7 +811,11 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     $("domainInput").addEventListener("change", function(){ runForm.domain = this.value; });
     $("litInput").addEventListener("change", function(){ runForm.literature = this.checked; });
     $("compInput").addEventListener("change", function(){ runForm.compute = this.checked; });
-    $("runBtn").addEventListener("click", startRun);
+    $("runBtn").addEventListener("click", function(){ startRun(); });
+    document.querySelectorAll(".ans-input").forEach(function(t){
+      t.addEventListener("input", function(){ answerDraft[t.dataset.i] = t.value; });
+    });
+    if($("answerRunBtn")) $("answerRunBtn").addEventListener("click", answerAndRerun);
     if($("cancelBtn")) $("cancelBtn").addEventListener("click", cancelRun);
     var openBtn = $("openReportBtn");
     if(openBtn) openBtn.addEventListener("click", function(){ select("report", run.result.report); });
@@ -931,12 +940,37 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     "</div>";
   }
 
+  function clarifyPanel(a){
+    var qs = (a.formalization || {}).clarifying_questions || [];
+    if(!qs.length) return "";
+    var prev = a.clarifications || [];
+    var stopped = a.verdict && a.verdict.verdict === "underspecified";
+    return '<div class="clarify"><p class="clarify-title">'+(stopped ? "Answer the questions to continue" : "Open questions")+"</p>" +
+      '<p class="hint">Your answers are added to the idea as authoritative statements about your setup, and Pandora runs again with them. Leave a field empty to skip a question.</p>' +
+      (prev.length ? '<details><summary class="hint">Answers given in earlier runs ('+prev.length+")</summary>"+
+        list(prev.map(function(c){ return "<strong>"+esc(c.question)+"</strong><br>"+esc(c.answer); }))+"</details>" : "") +
+      qs.map(function(q, i){
+        return '<div class="field"><label for="ans'+i+'">'+esc(q)+'</label><textarea class="ans-input" id="ans'+i+'" data-i="'+i+'" rows="2">'+esc(answerDraft[i] || "")+"</textarea></div>";
+      }).join("") +
+      '<div class="ws-actions"><button class="btn" id="answerRunBtn" type="button">Answer &amp; re-run</button></div></div>';
+  }
+
+  function answerAndRerun(){
+    var a = run.result.assessment, qs = (a.formalization || {}).clarifying_questions || [];
+    var fresh = qs.map(function(q, i){ return { question: q, answer: (answerDraft[i] || "").trim() }; })
+                  .filter(function(c){ return c.answer; });
+    if(!fresh.length){ flashNote("Answer at least one question", true); return; }
+    startRun({ idea: a.idea, clarifications: (a.clarifications || []).concat(fresh), parent_run: run.id });
+  }
+
   function renderResult(){
     if(run.status === "error") return '<div class="error-box">Run failed: '+esc(run.error || "unknown error")+"\n\nSee the agent trace below for details.</div>";
     if(run.status === "cancelled") return '<div class="error-box">Run cancelled.</div>';
     if(run.status !== "done" || !run.result) return "";
     var a = run.result.assessment;
-    return verdictCard(a.verdict) +
+    var answered = (a.clarifications || []).length;
+    return (answered ? '<p class="hint">This run included your answers to '+answered+" clarifying question"+(answered > 1 ? "s" : "")+".</p>" : "") +
+      verdictCard(a.verdict) + clarifyPanel(a) +
       '<div class="ws-actions" style="margin-top:10px"><button class="btn secondary small" id="openReportBtn" type="button">Open report</button>' +
       '<button class="btn secondary small" id="dlReportBtn" type="button">Download Markdown</button>' +
       '<span class="hint">saved as '+esc(run.result.report)+".md</span></div>";
@@ -953,8 +987,11 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     $("runHint").textContent = runHint();
   }
 
-  async function startRun(){
+  // opts (from "Answer & re-run"): { idea, clarifications, parent_run }
+  async function startRun(opts){
     if(run && run.status === "running") return;
+    opts = opts || {};
+    if(opts.idea){ runForm.idea = opts.idea; store("pandora_draft", runForm.idea); }
     var idea = (runForm.idea || "").trim();
     if(!idea){ $("ideaInput").focus(); return; }
     if(!settings.model){ openSettings(true); flashNote("Choose a model first", true); return; }
@@ -962,8 +999,10 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     try{
       var res = await api("POST", "/api/runs", {
         idea: idea, llm: llmPayload(), s2_api_key: settings.s2_api_key,
-        domain: runForm.domain, literature: runForm.literature, compute: runForm.compute
+        domain: runForm.domain, literature: runForm.literature, compute: runForm.compute,
+        clarifications: opts.clarifications || [], parent_run: opts.parent_run || null
       });
+      answerDraft = {};
       run = { id: res.id, status:"running", events:[], result:null, error:null };
       setStatus("live", "running · "+settings.model);
       renderRack(); renderRun();

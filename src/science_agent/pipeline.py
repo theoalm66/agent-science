@@ -43,6 +43,29 @@ class StageError(RuntimeError):
     pass
 
 
+def normalize_clarifications(items) -> list[dict]:
+    """Keep answered questions only, as clean {"question", "answer"} dicts."""
+    out = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question") or "").strip()
+        answer = str(item.get("answer") or "").strip()
+        if answer:
+            out.append({"question": question, "answer": answer})
+    return out
+
+
+def compose_source(idea: str, clarifications: list[dict]) -> str:
+    if not clarifications:
+        return idea
+    qa = "\n\n".join(f"Q: {c['question']}\nA: {c['answer']}" for c in clarifications)
+    return (
+        f"{idea}\n\n---\nTHE AUTHOR'S ANSWERS TO EARLIER CLARIFYING QUESTIONS "
+        f"(authoritative statements about the setup):\n\n{qa}"
+    )
+
+
 def check_idea_length(idea: str, limit: int) -> None:
     if len(idea) > limit:
         raise ValueError(
@@ -83,6 +106,13 @@ class Assessment:
     models: dict[str, str] = field(default_factory=dict)
     seconds: dict[str, float] = field(default_factory=dict)
     meta: dict = field(default_factory=dict)  # free-form run metadata, e.g. settings and prompt versions
+    # The author's answers to clarifying questions of an earlier run: [{"question", "answer"}].
+    clarifications: list[dict] = field(default_factory=list)
+
+    @property
+    def source(self) -> str:
+        """The text the stages assess: the idea plus the author's answers, if any."""
+        return compose_source(self.idea, self.clarifications)
 
     def to_dict(self) -> dict:
         def dump(m):
@@ -90,6 +120,7 @@ class Assessment:
 
         return {
             "idea": self.idea,
+            "clarifications": self.clarifications,
             "domain": self.domain,
             "started_at": self.started_at,
             "formalization": dump(self.formalization),
@@ -180,15 +211,16 @@ class Pipeline:
 
     # -- stages ------------------------------------------------------------
 
-    def run(self, idea: str) -> Assessment:
-        check_idea_length(idea.strip(), self.config.max_idea_chars)
+    def run(self, idea: str, clarifications: list[dict] | None = None) -> Assessment:
         a = Assessment(
             idea=idea.strip(),
             domain=self.domain.get("domain", self.config.domain),
             started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            clarifications=normalize_clarifications(clarifications),
         )
+        check_idea_length(a.source, self.config.max_idea_chars)
         a.formalization = self._timed(a, "formalize", lambda: self.ask(
-            "formalize", Formalization, idea=a.idea, knowledge_index=knowledge.render_index(self.domain)
+            "formalize", Formalization, idea=a.source, knowledge_index=knowledge.render_index(self.domain)
         ))
         f = a.formalization
         if f.underspecified:
@@ -205,7 +237,7 @@ class Pipeline:
                 verdict="underspecified",
                 confidence=1.0,
                 deciding_argument="Open points change how the claim must be tested; answer them before it is assessed.",
-                next_step="Answer the clarifying questions, add them to the idea, then re-run.",
+                next_step="Answer the clarifying questions, then re-run with the answers (Pandora: Answer & re-run).",
                 summary="\n\n".join(parts),
             )
             return a
@@ -238,7 +270,7 @@ class Pipeline:
             "critic",
             Critique,
             claim=f.claim,
-            original=a.idea,
+            original=a.source,
             literature=_dump(a.literature),
             limits=_dump(a.limits),
             computation=self._render_computation(a.computation),
@@ -248,7 +280,7 @@ class Pipeline:
             "verdict",
             VerdictResult,
             claim=f.claim,
-            original=a.idea,
+            original=a.source,
             literature=_dump(a.literature),
             limits=_dump(a.limits),
             computation=self._render_computation(a.computation),

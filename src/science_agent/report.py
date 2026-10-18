@@ -25,6 +25,9 @@ def _bullets(items, empty="(none)") -> str:
 def render_markdown(a: Assessment) -> str:
     v, f = a.verdict, a.formalization
     out = [f"# Idea assessment\n\n> {a.idea}\n"]
+    if a.clarifications:
+        qa = "\n".join(f"- **Q:** {c['question']}\n  **A:** {c['answer']}" for c in a.clarifications)
+        out.append(f"**Author's answers to clarifying questions:**\n{qa}\n")
     out.append(f"*Domain:* {a.domain} · *Date:* {a.started_at}\n")
 
     if v:

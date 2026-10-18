@@ -9,6 +9,9 @@ DOMAIN KNOWLEDGE BASE (limits that may apply):
 $knowledge_index
 
 Rules (research mode: open to new results, but always state the established view):
+- If the text ends with the author's answers to earlier clarifying questions, treat them as
+  authoritative facts about the setup. Do not ask those questions again; ask only about what is
+  still open, and set "underspecified" only if something that changes the test is still missing.
 - Never resolve an ambiguity by silently assuming the textbook setup. The author's setup or
   measurement may deliberately differ from it, and that difference may be the whole point.
 - If an ambiguity changes how the claim has to be tested, set "underspecified" to true and ask

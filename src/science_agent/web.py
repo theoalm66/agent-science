@@ -38,7 +38,7 @@ from .bench import load_benchmark
 from .config import Config, LLMConfig, load_config
 from .jsonutil import JSONExtractionError, extract_json
 from .llm import LLM
-from .pipeline import Pipeline, check_idea_length
+from .pipeline import Pipeline, check_idea_length, compose_source, normalize_clarifications
 from .report import render_markdown, save
 from .tools.literature import LiteratureSearch
 from .tools.sandbox import RunResult, run_python
@@ -63,9 +63,11 @@ class RunCancelled(Exception):
 class Run:
     """One assessment in a background thread; the browser polls its event list."""
 
-    def __init__(self, idea: str):
+    def __init__(self, idea: str, clarifications: list[dict] | None = None, parent_run: str | None = None):
         self.id = uuid.uuid4().hex[:12]
         self.idea = idea
+        self.clarifications = clarifications or []
+        self.parent_run = parent_run
         self.status = "running"  # running | done | error | cancelled
         self.events: list[dict] = []
         self.result: dict | None = None
@@ -83,6 +85,8 @@ class Run:
         return {
             "id": self.id,
             "idea": self.idea,
+            "clarifications": self.clarifications,
+            "parent_run": self.parent_run,
             "status": self.status,
             "events": events,
             "result": self.result if self.status == "done" else None,
@@ -332,13 +336,18 @@ class PandoraServer(ThreadingHTTPServer):
         if not idea:
             raise ValueError("The idea is empty")
         cfg, s2_key = self.run_config(body)
-        check_idea_length(idea, cfg.max_idea_chars)
+        raw = body.get("clarifications") or []
+        if not isinstance(raw, list):
+            raise ValueError("clarifications must be a list of {question, answer}")
+        clarifications = normalize_clarifications(raw)
+        parent_run = str(body.get("parent_run") or "")[:64] or None
+        check_idea_length(compose_source(idea, clarifications), cfg.max_idea_chars)
         # Freeze the prompts now: activating another version mid-run must not mix versions.
         prompts, prompt_versions = self.store.snapshot_prompts()
         with self.lock:
             if self.current and self.current.status == "running":
                 raise RuntimeError("A run is already in progress")
-            run = Run(idea)
+            run = Run(idea, clarifications, parent_run)
             self.current = run
             self.runs[run.id] = run
             for old in list(self.runs)[:-KEEP_RUNS]:
@@ -369,6 +378,7 @@ class PandoraServer(ThreadingHTTPServer):
             "literature": cfg.literature.enabled,
             "compute": cfg.compute.enabled,
             "prompt_versions": prompt_versions,
+            "parent_run": run.parent_run,
         }
 
     def _work(self, run: Run, cfg: Config, s2_key: str | None, prompts: dict, prompt_versions: dict) -> None:
@@ -397,7 +407,7 @@ class PandoraServer(ThreadingHTTPServer):
                 cfg, llms=llms, literature=literature, sandbox=sandbox,
                 progress=lambda stage: run.emit("stage", stage=stage), prompts=prompts,
             )
-            assessment = pipeline.run(run.idea)
+            assessment = pipeline.run(run.idea, run.clarifications)
             assessment.meta = self.run_meta(run, cfg, prompt_versions)
             path = save(assessment, cfg.output_dir)
             run.result = {
