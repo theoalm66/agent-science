@@ -103,6 +103,15 @@ pandora                 # or double-click Pandora.cmd on Windows; opens http://1
 pandora --port 9000 --no-browser
 ```
 
+On Windows with application control (Device Guard / WDAC), the pip-generated `pandora.exe` and
+`science-agent.exe` launchers may be blocked because they are unsigned. Run the modules through
+Python instead (`Pandora.cmd` already does this):
+
+```powershell
+.venv\Scripts\python.exe -m science_agent.web
+.venv\Scripts\python.exe -m science_agent.cli assess "..."
+```
+
 A local web app on top of the same pipeline:
 
 - **Settings (⚙):** presets for vLLM, LM Studio, Ollama, the Anthropic API or any
