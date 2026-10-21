@@ -363,6 +363,9 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       hint:"Start the server in LM Studio's Developer tab. Pandora calls it from its own process, so LM Studio's CORS setting does not matter." },
     { id:"ollama", label:"Ollama", provider:"openai_compatible", base_url:"http://localhost:11434/v1", model:"", json_mode:false,
       hint:"Ollama's OpenAI-compatible endpoint. Load models to see what is pulled." },
+    { id:"rhkoeln", label:"RH Köln AI", provider:"openai_compatible", base_url:"https://api.ai.rh-koeln.de/v1",
+      model:"meta-llama-3-8b-instruct", json_mode:false, max_tokens:2048,
+      hint:"API of the RH Köln (api.ai.rh-koeln.de). Enter your access token as API key; it is sent as \"Authorization: Bearer …\". meta-llama-3-8b-instruct has an 8k-token context, so replies are capped at 2048 tokens and long papers will not fit; if Load models lists a larger model, prefer it." },
     { id:"anthropic", label:"Anthropic API", provider:"anthropic", base_url:"", model:"claude-opus-5-5", json_mode:false,
       hint:"Needs the optional package once: .venv\\Scripts\\python -m pip install -e \".[anthropic]\". Enter a key from console.anthropic.com or set ANTHROPIC_API_KEY." },
     { id:"custom", label:"Custom endpoint", hint:"Any OpenAI-compatible URL ending in /v1: OpenRouter, OpenAI, llama.cpp server, a university API, …" }
@@ -560,6 +563,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
         settings.provider = p.provider; settings.base_url = p.base_url;
         if(p.model) settings.model = p.model;
         settings.json_mode = p.json_mode;
+        if(p.max_tokens) settings.max_tokens = p.max_tokens;
       }
       fillSettingsForm();
     });

@@ -12,6 +12,15 @@ llm:
   timeout: 600                       # seconds; local models can be slow
   json_mode: false                   # set true if your server supports response_format=json_object
 
+# Example: RH Köln AI API (OpenAI-compatible). Put the access token in an env var:
+#   PowerShell: setx RHK_API_KEY "<your token>"
+# llm:
+#   provider: openai_compatible
+#   base_url: https://api.ai.rh-koeln.de/v1
+#   model: meta-llama-3-8b-instruct
+#   api_key_env: RHK_API_KEY
+#   max_tokens: 2048                 # 8k-token context: leave room for the prompt
+
 # Example: Anthropic backend (pip install -e ".[anthropic]", uses ANTHROPIC_API_KEY)
 # llm:
 #   provider: anthropic
