@@ -108,11 +108,11 @@ def test_rh_koeln_api_is_called_like_any_openai_compatible_endpoint(monkeypatch)
         seen["body"] = json.loads(request.content)
         return httpx.Response(200, json={"choices": [{"message": {"content": '{"ok": true}'}}]})
 
-    cfg = LLMConfig(base_url="https://api.ai.rh-koeln.de/v1", model="meta-llama-3-8b-instruct",
+    cfg = LLMConfig(base_url="https://api.ai.rh-koeln.de/v1", model="qwen3-30b-a3b-instruct-2507",
                     api_key_env="RHK_API_KEY", max_tokens=2048)
     llm = OpenAICompatibleLLM(cfg, client=httpx.Client(transport=httpx.MockTransport(handler)))
     assert llm.complete("sys", "user") == '{"ok": true}'
     assert seen["url"] == "https://api.ai.rh-koeln.de/v1/chat/completions"
     assert seen["auth"] == "Bearer rhk-token"
-    assert seen["body"]["model"] == "meta-llama-3-8b-instruct" and seen["body"]["max_tokens"] == 2048
+    assert seen["body"]["model"] == "qwen3-30b-a3b-instruct-2507" and seen["body"]["max_tokens"] == 2048
     assert [m["role"] for m in seen["body"]["messages"]] == ["system", "user"]

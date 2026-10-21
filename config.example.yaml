@@ -17,9 +17,8 @@ llm:
 # llm:
 #   provider: openai_compatible
 #   base_url: https://api.ai.rh-koeln.de/v1
-#   model: meta-llama-3-8b-instruct
+#   model: qwen3-30b-a3b-instruct-2507
 #   api_key_env: RHK_API_KEY
-#   max_tokens: 2048                 # 8k-token context: leave room for the prompt
 
 # Example: Anthropic backend (pip install -e ".[anthropic]", uses ANTHROPIC_API_KEY)
 # llm:

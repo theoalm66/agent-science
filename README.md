@@ -64,16 +64,14 @@ Other OpenAI-compatible servers only need a different `base_url` (LM Studio
 `http://localhost:1234/v1`, vLLM `http://localhost:8000/v1`) and optionally `api_key_env`.
 
 RH Köln AI API (OpenAI-compatible; put the access token in an environment variable, e.g.
-`setx RHK_API_KEY "<token>"` on Windows). `meta-llama-3-8b-instruct` has an 8k-token context, so keep
-`max_tokens` around 2048 and expect long papers not to fit:
+`setx RHK_API_KEY "<token>"` on Windows):
 
 ```yaml
 llm:
   provider: openai_compatible
   base_url: https://api.ai.rh-koeln.de/v1
-  model: meta-llama-3-8b-instruct
+  model: qwen3-30b-a3b-instruct-2507
   api_key_env: RHK_API_KEY
-  max_tokens: 2048
 ```
 
 In Pandora, pick the **RH Köln AI** preset in ⚙ and enter the token as API key.

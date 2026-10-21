@@ -364,8 +364,8 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     { id:"ollama", label:"Ollama", provider:"openai_compatible", base_url:"http://localhost:11434/v1", model:"", json_mode:false,
       hint:"Ollama's OpenAI-compatible endpoint. Load models to see what is pulled." },
     { id:"rhkoeln", label:"RH Köln AI", provider:"openai_compatible", base_url:"https://api.ai.rh-koeln.de/v1",
-      model:"meta-llama-3-8b-instruct", json_mode:false, max_tokens:2048,
-      hint:"API of the RH Köln (api.ai.rh-koeln.de). Enter your access token as API key; it is sent as \"Authorization: Bearer …\". meta-llama-3-8b-instruct has an 8k-token context, so replies are capped at 2048 tokens and long papers will not fit; if Load models lists a larger model, prefer it." },
+      model:"qwen3-30b-a3b-instruct-2507", json_mode:false, max_tokens:8192,
+      hint:"API of the RH Köln (api.ai.rh-koeln.de). Enter your access token as API key; it is sent as \"Authorization: Bearer …\". Default model qwen3-30b-a3b-instruct-2507; Load models shows what else is offered. If the server reports a context-length error, lower Max tokens." },
     { id:"anthropic", label:"Anthropic API", provider:"anthropic", base_url:"", model:"claude-opus-5-5", json_mode:false,
       hint:"Needs the optional package once: .venv\\Scripts\\python -m pip install -e \".[anthropic]\". Enter a key from console.anthropic.com or set ANTHROPIC_API_KEY." },
     { id:"custom", label:"Custom endpoint", hint:"Any OpenAI-compatible URL ending in /v1: OpenRouter, OpenAI, llama.cpp server, a university API, …" }
