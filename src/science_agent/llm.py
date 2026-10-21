@@ -69,7 +69,7 @@ class OpenAICompatibleLLM:
             if resp.status_code in self.RETRY_STATUS and attempt < self.max_retries:
                 time.sleep(2**attempt)
                 continue
-            if resp.status_code != 200:
+            if not resp.is_success:  # some gateways (e.g. RH Köln) answer 201
                 raise LLMError(f"{url} returned {resp.status_code}: {resp.text[:500]}")
             data = resp.json()
             try:

@@ -116,3 +116,10 @@ def test_rh_koeln_api_is_called_like_any_openai_compatible_endpoint(monkeypatch)
     assert seen["auth"] == "Bearer rhk-token"
     assert seen["body"]["model"] == "qwen3-30b-a3b-instruct-2507" and seen["body"]["max_tokens"] == 2048
     assert [m["role"] for m in seen["body"]["messages"]] == ["system", "user"]
+
+
+def test_any_2xx_reply_is_accepted():
+    # The RH Köln gateway answers chat completions with 201 Created.
+    reply = {"choices": [{"message": {"content": '{"ok": true}'}}]}
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(201, json=reply)))
+    assert OpenAICompatibleLLM(LLMConfig(), client=client).complete("s", "u") == '{"ok": true}'

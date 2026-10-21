@@ -256,7 +256,7 @@ def list_models(provider: str, base_url: str, key: str | None) -> list[dict]:
             raise ValueError("No endpoint URL")
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         resp = httpx.get(base_url.rstrip("/") + "/models", headers=headers, timeout=15)
-    if resp.status_code != 200:
+    if not resp.is_success:
         raise ValueError(f"HTTP {resp.status_code}: {resp.text[:300]}")
     return [
         {"id": m.get("id"), "context": m.get("max_model_len") or m.get("context_length") or m.get("max_input_tokens")}
