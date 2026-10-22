@@ -175,3 +175,42 @@ def test_gemini_model_ids_lose_their_prefix(monkeypatch):
     monkeypatch.setattr(web.httpx, "get", lambda *a, **k: httpx.Response(200, json=payload))
     ids = [m["id"] for m in web.list_models("openai_compatible", "https://generativelanguage.googleapis.com/v1beta/openai", "k")]
     assert ids == ["gemini-x-flash", "plain-model"]
+
+
+def test_models_without_chat_support_switch_to_the_responses_api():
+    # e.g. gpt-5.4-pro: chat/completions answers 404 "not a chat model".
+    calls = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        calls.append((request.url.path, body))
+        if request.url.path.endswith("/chat/completions"):
+            return httpx.Response(404, json={"error": {"message": "This is not a chat model and thus not supported in the v1/chat/completions endpoint. Did you mean to use v1/completions?"}})
+        if "temperature" in body:
+            return httpx.Response(400, json={"error": {"message": "Unsupported parameter: 'temperature' is not supported with this model."}})
+        return httpx.Response(200, json={"status": "completed", "output": [
+            {"type": "reasoning", "summary": []},
+            {"type": "message", "content": [{"type": "output_text", "text": '{"ok": true}'}]},
+        ]})
+
+    cfg = LLMConfig(base_url="https://api.openai.com/v1", model="gpt-x-pro", max_tokens=16000, json_mode=True)
+    llm = OpenAICompatibleLLM(cfg, client=_chat_client(handler))
+    assert llm.complete("SYS", "USER") == '{"ok": true}'
+    path, body = calls[-1]
+    assert path == "/v1/responses"
+    assert body["instructions"] == "SYS" and body["input"] == "USER"
+    assert body["max_output_tokens"] == 16000 and "temperature" not in body
+    assert body["text"] == {"format": {"type": "json_object"}}
+    n = len(calls)
+    llm.complete("SYS", "USER")  # later calls go straight to /responses
+    assert len(calls) == n + 1 and calls[-1][0] == "/v1/responses"
+
+
+def test_responses_api_running_out_of_tokens_explains_itself():
+    reply = {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"},
+             "output": [{"type": "reasoning", "summary": []}]}
+    llm = OpenAICompatibleLLM(LLMConfig(base_url="https://api.openai.com/v1"),
+                              client=_chat_client(lambda r: httpx.Response(200, json=reply)))
+    llm.api = "responses"
+    with pytest.raises(LLMError, match="max_output_tokens.*raise max_tokens"):
+        llm.complete("s", "u")

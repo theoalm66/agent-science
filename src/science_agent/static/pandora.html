@@ -368,7 +368,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       hint:"API of the RH Köln (api.ai.rh-koeln.de). Enter your access token as API key; it is sent as \"Authorization: Bearer …\". Default model qwen3-30b-a3b-instruct-2507; Load models shows what else is offered. If the server reports a context-length error, lower Max tokens." },
     { id:"openai", label:"OpenAI (ChatGPT)", provider:"openai_compatible", base_url:"https://api.openai.com/v1",
       model:"", json_mode:true, max_tokens:16000,
-      hint:"OpenAI API (platform.openai.com, billed separately from a ChatGPT subscription). Enter an API key, then Load models and pick a chat model. Reasoning models count their thinking against Max tokens, so keep it generous." },
+      hint:"OpenAI API (platform.openai.com, billed separately from a ChatGPT subscription). Enter an API key, then Load models and pick a chat model. Reasoning models count their thinking against Max tokens, so keep it generous. Models that only support the Responses API (e.g. *-pro) are switched to it automatically; they can take many minutes per call, so raise Timeout (e.g. 1800 s)." },
     { id:"gemini", label:"Google Gemini", provider:"openai_compatible", base_url:"https://generativelanguage.googleapis.com/v1beta/openai",
       model:"", json_mode:false, max_tokens:16000,
       hint:"Gemini through Google's OpenAI-compatible endpoint. Create a key in Google AI Studio (aistudio.google.com), enter it as API key, then Load models and pick a gemini-… model." },

@@ -87,6 +87,9 @@ Model ids change often, so pick one with **Load models** in Pandora (both endpoi
 models). For reasoning models, set `max_tokens` generously (e.g. 16000): their hidden thinking counts
 against it. If a server rejects `max_tokens` or a custom `temperature`, the client switches to
 `max_completion_tokens` or the default temperature by itself.
+OpenAI models that are not served on `/chat/completions` (such as the `*-pro` models) are moved to
+the Responses API (`/responses`) automatically; they can take many minutes per call, so raise
+`timeout` (e.g. 1800 seconds).
 
 Claude:
 

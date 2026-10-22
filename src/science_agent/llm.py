@@ -46,6 +46,9 @@ class OpenAICompatibleLLM:
         # OpenAI's current models reject max_tokens in favour of max_completion_tokens.
         self.token_param = "max_completion_tokens" if "api.openai.com" in cfg.base_url else "max_tokens"
         self.send_temperature = True
+        # "chat" (/chat/completions) or "responses" (/responses). OpenAI serves some models, such
+        # as the *-pro ones, only through the Responses API; we switch when the server says so.
+        self.api = "chat"
 
     def _body(self, system: str, user: str) -> dict:
         body: dict = {
@@ -62,10 +65,26 @@ class OpenAICompatibleLLM:
             body["response_format"] = {"type": "json_object"}
         return body
 
+    def _responses_body(self, system: str, user: str) -> dict:
+        body: dict = {
+            "model": self.cfg.model,
+            "instructions": system,
+            "input": user,
+            "max_output_tokens": self.cfg.max_tokens,
+        }
+        if self.send_temperature:
+            body["temperature"] = self.cfg.temperature
+        if self.cfg.json_mode:
+            body["text"] = {"format": {"type": "json_object"}}
+        return body
+
     def _adapt(self, error_text: str) -> bool:
         """Drop or rename a parameter the server rejected (reasoning models); True if retrying helps."""
         text = error_text.lower()
-        if self.token_param == "max_tokens" and "max_tokens" in text and (
+        if self.api == "chat" and "not a chat model" in text:
+            self.api = "responses"
+            return True
+        if self.api == "chat" and self.token_param == "max_tokens" and "max_tokens" in text and (
             "max_completion_tokens" in text or "unsupported" in text
         ):
             self.token_param = "max_completion_tokens"
@@ -78,11 +97,14 @@ class OpenAICompatibleLLM:
         return False
 
     def complete(self, system: str, user: str) -> str:
-        url = self.cfg.base_url.rstrip("/") + "/chat/completions"
         attempt = adaptations = 0
         while True:
+            if self.api == "responses":
+                url, body = self.cfg.base_url.rstrip("/") + "/responses", self._responses_body(system, user)
+            else:
+                url, body = self.cfg.base_url.rstrip("/") + "/chat/completions", self._body(system, user)
             try:
-                resp = self.client.post(url, json=self._body(system, user), headers=self.headers)
+                resp = self.client.post(url, json=body, headers=self.headers)
             except httpx.TransportError as e:
                 if attempt == self.max_retries:
                     raise LLMError(f"Cannot reach {url}: {e}") from e
@@ -93,12 +115,14 @@ class OpenAICompatibleLLM:
                 attempt += 1
                 time.sleep(2**attempt)
                 continue
-            if resp.status_code == 400 and adaptations < 2 and self._adapt(resp.text):
+            if resp.status_code in (400, 404) and adaptations < 3 and self._adapt(resp.text):
                 adaptations += 1
                 continue
             if not resp.is_success:  # some gateways (e.g. RH Köln) answer 201
                 raise LLMError(f"{url} returned {resp.status_code}: {resp.text[:500]}")
             data = resp.json()
+            if self.api == "responses":
+                return self._responses_text(data)
             try:
                 choice = data["choices"][0]
                 content = choice["message"].get("content")
@@ -110,6 +134,27 @@ class OpenAICompatibleLLM:
                     "(reasoning models count their thinking); raise max_tokens"
                 )
             return strip_think_tags(content or "")
+
+
+    def _responses_text(self, data: dict) -> str:
+        """Collect the output_text parts of the message items; reasoning items come first and are skipped."""
+        parts = [
+            part.get("text") or ""
+            for item in data.get("output") or []
+            if item.get("type") == "message"
+            for part in item.get("content") or []
+            if part.get("type") == "output_text"
+        ]
+        content = "".join(parts)
+        if not content and data.get("status") == "incomplete":
+            reason = (data.get("incomplete_details") or {}).get("reason", "unknown")
+            raise LLMError(
+                f"{self.cfg.model} stopped before answering ({reason}); reasoning models count their "
+                f"thinking against the {self.cfg.max_tokens}-token limit, so raise max_tokens"
+            )
+        if not content:
+            raise LLMError(f"Unexpected response shape: {str(data)[:500]}")
+        return strip_think_tags(content)
 
 
 class AnthropicLLM:
