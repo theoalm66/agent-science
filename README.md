@@ -76,6 +76,18 @@ llm:
 
 In Pandora, pick the **RH Köln AI** preset in ⚙ and enter the token as API key.
 
+OpenAI and Google Gemini also run through `openai_compatible`:
+
+| Provider | `base_url` | Key |
+|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | API key from platform.openai.com (`OPENAI_API_KEY`) |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | Key from Google AI Studio (`GEMINI_API_KEY`) |
+
+Model ids change often, so pick one with **Load models** in Pandora (both endpoints list their
+models). For reasoning models, set `max_tokens` generously (e.g. 16000): their hidden thinking counts
+against it. If a server rejects `max_tokens` or a custom `temperature`, the client switches to
+`max_completion_tokens` or the default temperature by itself.
+
 Claude:
 
 ```yaml

@@ -27,7 +27,7 @@ class LLM(Protocol):
 
 
 class OpenAICompatibleLLM:
-    """Chat-completions client for Ollama, LM Studio, vLLM, llama.cpp, OpenRouter, OpenAI."""
+    """Chat-completions client for vLLM, LM Studio, Ollama, llama.cpp, OpenAI, Gemini, OpenRouter, ..."""
 
     RETRY_STATUS = {408, 429, 500, 502, 503, 504}
 
@@ -43,41 +43,73 @@ class OpenAICompatibleLLM:
         self.client = client or httpx.Client(timeout=cfg.timeout)
         self.headers = headers
         self.max_retries = max_retries
+        # OpenAI's current models reject max_tokens in favour of max_completion_tokens.
+        self.token_param = "max_completion_tokens" if "api.openai.com" in cfg.base_url else "max_tokens"
+        self.send_temperature = True
 
-    def complete(self, system: str, user: str) -> str:
+    def _body(self, system: str, user: str) -> dict:
         body: dict = {
             "model": self.cfg.model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": self.cfg.temperature,
-            "max_tokens": self.cfg.max_tokens,
+            self.token_param: self.cfg.max_tokens,
         }
+        if self.send_temperature:
+            body["temperature"] = self.cfg.temperature
         if self.cfg.json_mode:
             body["response_format"] = {"type": "json_object"}
-        url = self.cfg.base_url.rstrip("/") + "/chat/completions"
+        return body
 
-        for attempt in range(self.max_retries + 1):
+    def _adapt(self, error_text: str) -> bool:
+        """Drop or rename a parameter the server rejected (reasoning models); True if retrying helps."""
+        text = error_text.lower()
+        if self.token_param == "max_tokens" and "max_tokens" in text and (
+            "max_completion_tokens" in text or "unsupported" in text
+        ):
+            self.token_param = "max_completion_tokens"
+            return True
+        if self.send_temperature and "temperature" in text and any(
+            w in text for w in ("unsupported", "not supported", "does not support", "only the default")
+        ):
+            self.send_temperature = False
+            return True
+        return False
+
+    def complete(self, system: str, user: str) -> str:
+        url = self.cfg.base_url.rstrip("/") + "/chat/completions"
+        attempt = adaptations = 0
+        while True:
             try:
-                resp = self.client.post(url, json=body, headers=self.headers)
+                resp = self.client.post(url, json=self._body(system, user), headers=self.headers)
             except httpx.TransportError as e:
                 if attempt == self.max_retries:
                     raise LLMError(f"Cannot reach {url}: {e}") from e
+                attempt += 1
                 time.sleep(2**attempt)
                 continue
             if resp.status_code in self.RETRY_STATUS and attempt < self.max_retries:
+                attempt += 1
                 time.sleep(2**attempt)
+                continue
+            if resp.status_code == 400 and adaptations < 2 and self._adapt(resp.text):
+                adaptations += 1
                 continue
             if not resp.is_success:  # some gateways (e.g. RH Köln) answer 201
                 raise LLMError(f"{url} returned {resp.status_code}: {resp.text[:500]}")
             data = resp.json()
             try:
-                content = data["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError) as e:
+                choice = data["choices"][0]
+                content = choice["message"].get("content")
+            except (KeyError, IndexError, TypeError, AttributeError) as e:
                 raise LLMError(f"Unexpected response shape: {str(data)[:500]}") from e
+            if not content and choice.get("finish_reason") == "length":
+                raise LLMError(
+                    f"{self.cfg.model} used all {self.cfg.max_tokens} tokens before answering "
+                    "(reasoning models count their thinking); raise max_tokens"
+                )
             return strip_think_tags(content or "")
-        raise LLMError("unreachable")  # pragma: no cover
 
 
 class AnthropicLLM:

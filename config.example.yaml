@@ -20,6 +20,24 @@ llm:
 #   model: qwen3-30b-a3b-instruct-2507
 #   api_key_env: RHK_API_KEY
 
+# Example: OpenAI API (key from platform.openai.com in OPENAI_API_KEY).
+# Pick a chat model id from https://platform.openai.com/docs/models (or Pandora's "Load models").
+# llm:
+#   provider: openai_compatible
+#   base_url: https://api.openai.com/v1
+#   model: <openai model id>
+#   api_key_env: OPENAI_API_KEY
+#   max_tokens: 16000                # reasoning models count their thinking here
+#   json_mode: true
+
+# Example: Google Gemini via its OpenAI-compatible endpoint (key from aistudio.google.com).
+# llm:
+#   provider: openai_compatible
+#   base_url: https://generativelanguage.googleapis.com/v1beta/openai
+#   model: <gemini model id, e.g. from Pandora's "Load models">
+#   api_key_env: GEMINI_API_KEY
+#   max_tokens: 16000
+
 # Example: Anthropic backend (pip install -e ".[anthropic]", uses ANTHROPIC_API_KEY)
 # llm:
 #   provider: anthropic

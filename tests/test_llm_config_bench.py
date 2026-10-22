@@ -123,3 +123,55 @@ def test_any_2xx_reply_is_accepted():
     reply = {"choices": [{"message": {"content": '{"ok": true}'}}]}
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(201, json=reply)))
     assert OpenAICompatibleLLM(LLMConfig(), client=client).complete("s", "u") == '{"ok": true}'
+
+
+def _chat_client(handler):
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_openai_endpoint_uses_max_completion_tokens():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    cfg = LLMConfig(base_url="https://api.openai.com/v1", model="gpt-x", max_tokens=4000)
+    OpenAICompatibleLLM(cfg, client=_chat_client(handler)).complete("s", "u")
+    assert bodies[0]["max_completion_tokens"] == 4000 and "max_tokens" not in bodies[0]
+
+
+def test_rejected_parameters_are_adapted_and_retried():
+    # Reasoning models behind other gateways reject max_tokens and a custom temperature.
+    bodies = []
+    errors = iter([
+        httpx.Response(400, json={"error": {"message": "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens'."}}),
+        httpx.Response(400, json={"error": {"message": "Unsupported value: 'temperature' does not support 0.2. Only the default (1) value is supported."}}),
+    ])
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return next(errors, httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]}))
+
+    llm = OpenAICompatibleLLM(LLMConfig(base_url="https://gateway.example/v1"), client=_chat_client(handler))
+    assert llm.complete("s", "u") == "{}"
+    assert "max_tokens" in bodies[0] and "temperature" in bodies[0]
+    assert "max_completion_tokens" in bodies[2] and "temperature" not in bodies[2]
+    llm.complete("s", "u")  # the adaptation sticks for later calls
+    assert len(bodies) == 4
+
+
+def test_empty_reply_after_token_limit_explains_itself():
+    reply = {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
+    client = _chat_client(lambda r: httpx.Response(200, json=reply))
+    with pytest.raises(LLMError, match="raise max_tokens"):
+        OpenAICompatibleLLM(LLMConfig(), client=client).complete("s", "u")
+
+
+def test_gemini_model_ids_lose_their_prefix(monkeypatch):
+    from science_agent import web
+
+    payload = {"data": [{"id": "models/gemini-x-flash"}, {"id": "plain-model"}]}
+    monkeypatch.setattr(web.httpx, "get", lambda *a, **k: httpx.Response(200, json=payload))
+    ids = [m["id"] for m in web.list_models("openai_compatible", "https://generativelanguage.googleapis.com/v1beta/openai", "k")]
+    assert ids == ["gemini-x-flash", "plain-model"]

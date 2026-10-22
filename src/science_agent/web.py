@@ -259,7 +259,11 @@ def list_models(provider: str, base_url: str, key: str | None) -> list[dict]:
     if not resp.is_success:
         raise ValueError(f"HTTP {resp.status_code}: {resp.text[:300]}")
     return [
-        {"id": m.get("id"), "context": m.get("max_model_len") or m.get("context_length") or m.get("max_input_tokens")}
+        {
+            # Gemini lists "models/gemini-..."; chat completions take the bare id.
+            "id": m["id"].removeprefix("models/"),
+            "context": m.get("max_model_len") or m.get("context_length") or m.get("max_input_tokens"),
+        }
         for m in resp.json().get("data") or []
         if m.get("id")
     ]
