@@ -7,7 +7,7 @@ llm:
   # TODO: the exact model id vLLM serves; list it with: curl -s http://192.168.2.84:8008/v1/models
   model: nvidia/Qwen3.6-35B-A3B-NVFP4
   json_mode: true
-  max_tokens: 8192
+  max_tokens: 24576   # reasoning models count their thinking; 8192 ran out in the compute stage
   timeout: 900
 
 literature:
@@ -18,7 +18,7 @@ literature:
 compute:
   enabled: true
   timeout: 60
-  sandbox_url: http://sandbox:8090           # the isolated runner container
+  sandbox_url: unix:///run/sandbox/sandbox.sock   # the isolated runner container (no network)
 
 output_dir: /data/reports
 

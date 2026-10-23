@@ -58,6 +58,30 @@ def test_sandbox_runner_round_trip():
         srv.server_close()
 
 
+def test_sandbox_runner_over_unix_socket(tmp_path):
+    import os
+    import threading
+
+    if os.name != "posix":
+        return
+    from science_agent.tools import sandbox_server
+    from science_agent.tools.sandbox import RemoteSandbox
+
+    path = str(tmp_path / "sandbox.sock")
+    srv, _ = sandbox_server.make_server("", 0, path)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        assert os.stat(path).st_mode & 0o777 == 0o666
+        r = RemoteSandbox(f"unix://{path}")("import json\nprint('RESULT_JSON: ' + json.dumps({'v': 6 * 7}))", timeout=30)
+        assert r.ok and r.result == {"v": 42}
+    finally:
+        srv.shutdown()
+        srv.server_close()
+    assert not os.path.exists(path)
+    r = RemoteSandbox(f"unix://{path}")("print(1)", timeout=1)
+    assert not r.ok and "unreachable" in r.summary()
+
+
 def test_unreachable_runner_reports_a_failed_script():
     from science_agent.tools.sandbox import RemoteSandbox
 

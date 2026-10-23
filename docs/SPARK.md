@@ -8,7 +8,7 @@ freigegeben.
 Gast-Laptop ──Tailscale──▶ tailscale serve (HTTPS, setzt Tailscale-User-Login)
                               │
                               ▼  127.0.0.1:8765 (nur lokal)
-                         ┌──────────────┐  internes Netz   ┌──────────────────┐
+                         ┌──────────────┐   Unix-Socket    ┌──────────────────┐
                          │   pandora    │ ───────────────▶ │     sandbox      │
                          │ (uid 10001)  │                  │ kein Netz, ro-FS │
                          └──────┬───────┘                  │ nobody, 2 GB RAM │
@@ -25,7 +25,9 @@ Gast-Laptop ──Tailscale──▶ tailscale serve (HTTPS, setzt Tailscale-Use
   das Modell vom Server, können keine Prompts bearbeiten und nichts importieren, und sie sehen nur
   ihre eigenen Läufe und Berichte.
 - **Python-Skripte** laufen im Container `sandbox`:
-  - ohne Internet und ohne Heimnetz (internes Docker-Netz),
+  - ganz ohne Netzwerk (`network_mode: none`): kein Internet, kein Heimnetz und auch nicht
+    Pandoras eigene API, an die ein Skript sonst eine gefälschte `Tailscale-User-Login`-Kopfzeile
+    schicken könnte. Pandora spricht den Runner über einen Unix-Socket im Volume `sandbox-socket` an,
   - mit schreibgeschütztem Dateisystem,
   - als `nobody` ohne Capabilities,
   - mit höchstens 2 GB RAM, 2 CPUs und 128 Prozessen.

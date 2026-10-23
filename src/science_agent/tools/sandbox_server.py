@@ -1,8 +1,10 @@
 """Sandbox runner: executes model-written Python for Pandora, one script at a time.
 
-Meant to run in its own container with no network access, a read-only filesystem, a
+Meant to run in its own container with no network at all, a read-only filesystem, a
 non-root user and memory/CPU/process limits (see docker-compose.yml). Pandora reaches it
-over an internal Docker network and calls POST /run with {"code": ..., "timeout": ...}.
+through a Unix socket on a shared volume (--socket) and calls POST /run with
+{"code": ..., "timeout": ...}. Without a network the scripts cannot reach Pandora's API, where
+they could otherwise claim any identity in the Tailscale-User-Login header.
 """
 
 from __future__ import annotations
@@ -10,6 +12,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import socketserver
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from .sandbox import run_python
@@ -21,6 +25,10 @@ log = logging.getLogger(__name__)
 
 
 class Handler(BaseHTTPRequestHandler):
+    def address_string(self) -> str:
+        # Over a Unix socket client_address is "" rather than (host, port).
+        return self.client_address[0] if isinstance(self.client_address, tuple) else "unix"
+
     def log_message(self, fmt: str, *args) -> None:
         log.info("%s - %s", self.address_string(), fmt % args)
 
@@ -54,15 +62,35 @@ class Handler(BaseHTTPRequestHandler):
                     "timed_out": r.timed_out})
 
 
+class UnixHTTPServer(socketserver.UnixStreamServer):
+    def __init__(self, path: str, handler):
+        if os.path.exists(path):
+            os.unlink(path)  # left over from a previous run
+        super().__init__(path, handler)
+        os.chmod(path, 0o666)  # Pandora connects as another uid
+
+    def server_close(self) -> None:
+        super().server_close()
+        if os.path.exists(self.server_address):
+            os.unlink(self.server_address)
+
+
+def make_server(host: str, port: int, socket_path: str | None):
+    # Single-threaded on purpose: scripts run one after another, never side by side.
+    if socket_path:
+        return UnixHTTPServer(socket_path, Handler), socket_path
+    return HTTPServer((host, port), Handler), f"{host}:{port}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sandbox-runner", description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8090)
+    parser.add_argument("--socket", help="listen on this Unix socket instead of host:port")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
-    # Single-threaded on purpose: scripts run one after another, never side by side.
-    server = HTTPServer((args.host, args.port), Handler)
-    print(f"Sandbox runner listening on {args.host}:{args.port}", flush=True)
+    server, where = make_server(args.host, args.port, args.socket)
+    print(f"Sandbox runner listening on {where}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

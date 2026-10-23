@@ -124,11 +124,21 @@ def _kill_group(proc: subprocess.Popen) -> None:
 
 
 class RemoteSandbox:
-    """Runs scripts in a sandbox runner over HTTP (see sandbox_server.py). Same call shape as run_python."""
+    """Runs scripts in a sandbox runner over HTTP (see sandbox_server.py). Same call shape as run_python.
+
+    url is http://host:port, or unix:///path/to/socket for a runner without any network (the
+    docker-compose setup), so model-written code has no route back to Pandora or anywhere else.
+    """
 
     def __init__(self, url: str, client: httpx.Client | None = None):
-        self.url = url.rstrip("/") + "/run"
-        self.client = client or httpx.Client()
+        self.where = url
+        if url.startswith("unix://"):
+            socket_path = url[len("unix://"):]
+            self.url = "http://sandbox/run"
+            self.client = client or httpx.Client(transport=httpx.HTTPTransport(uds=socket_path))
+        else:
+            self.url = url.rstrip("/") + "/run"
+            self.client = client or httpx.Client()
 
     def __call__(self, code: str, timeout: float = 60) -> RunResult:
         try:
@@ -136,7 +146,7 @@ class RemoteSandbox:
             resp.raise_for_status()
             data = resp.json()
         except (httpx.HTTPError, ValueError) as e:
-            return RunResult(False, "", f"Sandbox runner unreachable at {self.url}: {e}", None)
+            return RunResult(False, "", f"Sandbox runner unreachable at {self.where}: {e}", None)
         return RunResult(
             bool(data.get("ok")), str(data.get("stdout") or ""), str(data.get("stderr") or ""),
             data.get("result") if isinstance(data.get("result"), dict) else None,

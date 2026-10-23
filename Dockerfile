@@ -18,8 +18,9 @@ COPY .claude ./.claude
 # them in Pandora; their version history lives in the /data volume.
 RUN pip install -e . \
  && useradd --uid 10001 --create-home pandora \
- && mkdir -p /data \
- && chown -R pandora /data /app/src/science_agent/prompts /app/.claude
+ && mkdir -p /data /run/sandbox \
+ && chown -R pandora /data /app/src/science_agent/prompts /app/.claude \
+ && chown 65534:65534 /run/sandbox
 
 USER pandora
 EXPOSE 8765
