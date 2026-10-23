@@ -14,6 +14,7 @@ only expose it (--host 0.0.0.0) on a network you trust.
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -41,7 +42,7 @@ from .llm import LLM
 from .pipeline import Pipeline, check_idea_length, compose_source, normalize_clarifications
 from .report import render_markdown, save
 from .tools.literature import LiteratureSearch
-from .tools.sandbox import RunResult, run_python
+from .tools.sandbox import RemoteSandbox, RunResult, run_python
 from .versions import VersionStore
 
 log = logging.getLogger(__name__)
@@ -60,15 +61,31 @@ class RunCancelled(Exception):
     pass
 
 
+class User(NamedTuple):
+    login: str
+    admin: bool
+
+
+LOCAL_USER = User("local", True)
+
+
 class Run:
     """One assessment in a background thread; the browser polls its event list."""
 
-    def __init__(self, idea: str, clarifications: list[dict] | None = None, parent_run: str | None = None):
+    def __init__(
+        self,
+        idea: str,
+        clarifications: list[dict] | None = None,
+        parent_run: str | None = None,
+        owner: str = "local",
+    ):
         self.id = uuid.uuid4().hex[:12]
         self.idea = idea
         self.clarifications = clarifications or []
         self.parent_run = parent_run
-        self.status = "running"  # running | done | error | cancelled
+        self.owner = owner
+        self.status = "queued"  # queued | running | done | error | cancelled
+        self.queue_position: int | None = None
         self.events: list[dict] = []
         self.result: dict | None = None
         self.error: str | None = None
@@ -88,6 +105,7 @@ class Run:
             "clarifications": self.clarifications,
             "parent_run": self.parent_run,
             "status": self.status,
+            "queue_position": self.queue_position,
             "events": events,
             "result": self.result if self.status == "done" else None,
             "error": self.error,
@@ -277,7 +295,7 @@ class PandoraServer(ThreadingHTTPServer):
         address: tuple[str, int],
         config_path: str | None = None,
         llm_factory: Callable[[Config], dict[str, LLM]] | None = None,
-        sandbox: Callable[[str, float], RunResult] = run_python,
+        sandbox: Callable[[str, float], RunResult] | None = None,
         literature_factory: Callable[[Config, str | None], LiteratureSearch] | None = None,
         store: VersionStore | None = None,
     ):
@@ -285,8 +303,9 @@ class PandoraServer(ThreadingHTTPServer):
         self.config_path = config_path
         if store is None:
             project = _project_dir()
+            data_dir = Path(os.environ.get("PANDORA_DATA_DIR") or project / "pandora-data")
             store = VersionStore(
-                project / "pandora-data" / "versions.json",
+                data_dir / "versions.json",
                 Path(str(resources.files("science_agent") / "prompts")),
                 project,
             )
@@ -299,12 +318,30 @@ class PandoraServer(ThreadingHTTPServer):
         self.runs: dict[str, Run] = {}
         self.current: Run | None = None
         self.lock = threading.Lock()
+        # Runs execute one at a time, in order, on a single worker thread.
+        self.queue: collections.deque[tuple[Run, tuple]] = collections.deque()
+        self.queue_ready = threading.Condition(self.lock)
+        threading.Thread(target=self._worker, daemon=True, name="pandora-worker").start()
 
     def config(self) -> Config:
         return load_config(self.config_path)
 
     def config_file(self) -> Path:
         return Path(self.config_path or os.environ.get("SCIENCE_AGENT_CONFIG") or "config.yaml").resolve()
+
+    def user_for(self, headers) -> User | None:
+        """Who is calling. Local mode: always the admin. Shared mode: the Tailscale login that
+        Tailscale Serve put in the identity header, or None when the header is missing."""
+        server = self.config().server
+        if server.mode == "local":
+            return LOCAL_USER
+        login = (headers.get(server.identity_header) or "").strip()
+        if not login:
+            return None
+        return User(login, login.lower() in {a.strip().lower() for a in server.admins})
+
+    def can_see(self, user: User, owner: str | None) -> bool:
+        return user.admin or (owner is not None and owner == user.login)
 
     def host_allowed(self, host: str) -> bool:
         """Reject foreign Host headers (DNS rebinding) unless deliberately bound to all interfaces."""
@@ -335,10 +372,13 @@ class PandoraServer(ThreadingHTTPServer):
         s2_key = str(body.get("s2_api_key") or "").strip() or (os.environ.get(env) if env else None)
         return cfg, s2_key
 
-    def start_run(self, body: dict) -> Run:
+    def start_run(self, body: dict, user: User = LOCAL_USER) -> Run:
         idea = str(body.get("idea") or "").strip()
         if not idea:
             raise ValueError("The idea is empty")
+        if not user.admin:
+            # Guests use the model, endpoint and keys configured on the server, nothing from the browser.
+            body = {k: v for k, v in body.items() if k not in ("llm", "s2_api_key")}
         cfg, s2_key = self.run_config(body)
         raw = body.get("clarifications") or []
         if not isinstance(raw, list):
@@ -349,22 +389,53 @@ class PandoraServer(ThreadingHTTPServer):
         # Freeze the prompts now: activating another version mid-run must not mix versions.
         prompts, prompt_versions = self.store.snapshot_prompts()
         with self.lock:
-            if self.current and self.current.status == "running":
-                raise RuntimeError("A run is already in progress")
-            run = Run(idea, clarifications, parent_run)
-            self.current = run
+            active = [r for r in self.runs.values() if r.owner == user.login and r.status in ("queued", "running")]
+            limit = cfg.server.max_runs_per_user
+            if len(active) >= limit:
+                raise RuntimeError(f"You already have {len(active)} run(s) queued or running (limit {limit})")
+            run = Run(idea, clarifications, parent_run, owner=user.login)
             self.runs[run.id] = run
-            for old in list(self.runs)[:-KEEP_RUNS]:
+            finished = [k for k, r in self.runs.items() if r.status not in ("queued", "running")]
+            for old in finished[: max(0, len(self.runs) - KEEP_RUNS)]:
                 del self.runs[old]
+            self.queue.append((run, (cfg, s2_key, prompts, prompt_versions)))
+            self._renumber_queue()
+            self.queue_ready.notify()
         run.emit(
-            "start", provider=cfg.llm.provider, model=cfg.llm.model, base_url=cfg.llm.base_url,
+            "start", provider=cfg.llm.provider, model=cfg.llm.model,
+            base_url=cfg.llm.base_url if user.admin else None,
             domain=cfg.domain, literature=cfg.literature.enabled, compute=cfg.compute.enabled,
-            prompt_versions=prompt_versions,
+            prompt_versions=prompt_versions, queue_position=run.queue_position,
         )
-        threading.Thread(
-            target=self._work, args=(run, cfg, s2_key, prompts, prompt_versions), daemon=True, name=f"run-{run.id}"
-        ).start()
         return run
+
+    def _renumber_queue(self) -> None:
+        """Positions as people see them: 1 = next to start. Call with the lock held."""
+        for i, (queued, _) in enumerate(self.queue, 1):
+            queued.queue_position = i
+
+    def cancel_run(self, run: Run) -> None:
+        with self.lock:
+            run.cancel.set()
+            queued = [item for item in self.queue if item[0] is run]
+            if not queued:
+                return  # running: stops at its next model call
+            self.queue.remove(queued[0])
+            self._renumber_queue()
+            run.status, run.queue_position = "cancelled", None
+        run.emit("end", status="cancelled")
+
+    def _worker(self) -> None:
+        while True:
+            with self.lock:
+                while not self.queue:
+                    self.queue_ready.wait()
+                run, args = self.queue.popleft()
+                self._renumber_queue()
+                run.status, run.queue_position = "running", None
+                self.current = run
+            run.emit("dequeued")
+            self._work(run, *args)
 
     @staticmethod
     def run_meta(run: Run, cfg: Config, prompt_versions: dict) -> dict:
@@ -383,6 +454,7 @@ class PandoraServer(ThreadingHTTPServer):
             "compute": cfg.compute.enabled,
             "prompt_versions": prompt_versions,
             "parent_run": run.parent_run,
+            "owner": run.owner,
         }
 
     def _work(self, run: Run, cfg: Config, s2_key: str | None, prompts: dict, prompt_versions: dict) -> None:
@@ -395,11 +467,15 @@ class PandoraServer(ThreadingHTTPServer):
                 for stage, llm in self.llm_factory(cfg).items()
             }
 
+            base_sandbox = self.sandbox or (
+                RemoteSandbox(cfg.compute.sandbox_url) if cfg.compute.sandbox_url else run_python
+            )
+
             def sandbox(code: str, timeout: float) -> RunResult:
                 if run.cancel.is_set():
                     raise RunCancelled()
                 run.emit("sandbox_start", code=code)
-                result = self.sandbox(code, timeout)
+                result = base_sandbox(code, timeout)
                 run.emit("sandbox_result", ok=result.ok, timed_out=result.timed_out,
                          output=result.summary(), result=result.result)
                 return result
@@ -432,9 +508,10 @@ class PandoraServer(ThreadingHTTPServer):
 
     # -- export / import -------------------------------------------------------
 
-    def export_bundle(self, runs: str | list[str] = "all", versions: bool = True) -> dict:
+    def export_bundle(self, runs: str | list[str] = "all", versions: bool = True, user: User = LOCAL_USER) -> dict:
         output_dir = self.config().output_dir
-        names = [r["name"] for r in list_reports(output_dir)]
+        names = [r["name"] for r in list_reports(output_dir) if self.can_see(user, r["meta"].get("owner"))]
+        versions = versions and user.admin
         if runs != "all":
             wanted = set(runs or [])
             names = [n for n in names if n in wanted]
@@ -509,7 +586,22 @@ class Handler(BaseHTTPRequestHandler):
         if not self.server.host_allowed(self.headers.get("Host", "")):
             self._error(403, "Host not allowed")
             return False
+        user = self.server.user_for(self.headers)
+        if user is None:
+            self._error(403, "Pandora is shared through Tailscale: open it with its Tailscale (https://….ts.net) address")
+            return False
+        self.user = user
         return True
+
+    def _admin_only(self) -> bool:
+        if not self.user.admin:
+            self._error(403, "Only the Pandora admin can do this")
+            return False
+        return True
+
+    def _visible_run(self, run_id: str):
+        run = self.server.runs.get(run_id)
+        return run if run and self.server.can_see(self.user, run.owner) else None
 
     def do_GET(self) -> None:
         if not self._guard():
@@ -526,14 +618,16 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ["api", "library"]:
                 return self._json(library(self.server.store))
             if parts == ["api", "reports"]:
-                return self._json(list_reports(self.server.config().output_dir))
+                reports = list_reports(self.server.config().output_dir)
+                return self._json([r for r in reports if self.server.can_see(self.user, r["meta"].get("owner"))])
             if len(parts) == 3 and parts[:2] == ["api", "reports"]:
                 return self._report(parts[2])
             if parts == ["api", "runs", "current"]:
                 run = self.server.current
-                return self._json({"run": run.snapshot() if run else None})
+                visible = run is not None and self.server.can_see(self.user, run.owner)
+                return self._json({"run": run.snapshot() if visible else None})
             if len(parts) == 3 and parts[:2] == ["api", "runs"]:
-                run = self.server.runs.get(parts[2])
+                run = self._visible_run(parts[2])
                 if not run:
                     return self._error(404, "Unknown run")
                 since = int((query.get("since") or ["0"])[0] or 0)
@@ -551,7 +645,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.headers.get("Content-Type", "").startswith("application/json"):
             return self._error(415, "Expected application/json")
         origin = self.headers.get("Origin")
-        if origin and origin != f"http://{self.headers.get('Host', '')}":
+        host = self.headers.get("Host", "")
+        allowed = {f"http://{host}", f"https://{host}", *self.server.config().server.allowed_origins}
+        if origin and origin.rstrip("/") not in {o.rstrip("/") for o in allowed}:
             return self._error(403, "Origin not allowed")
         parts = [p for p in urlsplit(self.path).path.split("/") if p]
         length = int(self.headers.get("Content-Length") or 0)
@@ -565,29 +661,32 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "Expected a JSON object")
         try:
             if parts == ["api", "models"]:
-                return self._models(body)
+                return self._admin_only() and self._models(body)
             if len(parts) == 3 and parts[:2] == ["api", "versions"]:
-                return self._versions(parts[2], body)
+                return self._admin_only() and self._versions(parts[2], body)
             if parts == ["api", "export"]:
-                return self._json(self.server.export_bundle(body.get("runs", "all"), bool(body.get("versions", True))))
+                return self._json(self.server.export_bundle(
+                    body.get("runs", "all"), bool(body.get("versions", True)), self.user))
             if parts == ["api", "import"]:
+                if not self._admin_only():
+                    return
                 try:
                     return self._json(self.server.import_bundle(body))
                 except ValueError as e:
                     return self._error(400, str(e))
             if parts == ["api", "runs"]:
                 try:
-                    run = self.server.start_run(body)
+                    run = self.server.start_run(body, self.user)
                 except RuntimeError as e:
                     return self._error(409, str(e))
                 except ValueError as e:
                     return self._error(400, str(e))
                 return self._json({"id": run.id})
             if len(parts) == 4 and parts[:2] == ["api", "runs"] and parts[3] == "cancel":
-                run = self.server.runs.get(parts[2])
+                run = self._visible_run(parts[2])
                 if not run:
                     return self._error(404, "Unknown run")
-                run.cancel.set()
+                self.server.cancel_run(run)
                 return self._json({"ok": True})
             self._error(404, "Not found")
         except Exception as e:
@@ -596,8 +695,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def _config_view(self) -> dict:
         cfg = self.server.config()
+        identity = {"mode": cfg.server.mode, "user": self.user.login, "admin": self.user.admin}
+        if not self.user.admin:
+            # Guests see which model answers them, not where the server and its files are.
+            return {
+                **identity,
+                "llm": {"provider": cfg.llm.provider, "model": cfg.llm.model},
+                "stages": {},
+                "domain": cfg.domain,
+                "domains": knowledge.available_domains(),
+                "literature": {"enabled": cfg.literature.enabled},
+                "compute": {"enabled": cfg.compute.enabled},
+                "max_runs_per_user": cfg.server.max_runs_per_user,
+            }
         llm = cfg.llm.model_dump(exclude={"api_key_value"})
         return {
+            **identity,
             "config_file": str(self.server.config_file()),
             "config_exists": self.server.config_file().exists(),
             "llm": llm,
@@ -646,7 +759,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _report(self, name: str) -> None:
         output_dir = self.server.config().output_dir
-        if name not in {r["name"] for r in list_reports(output_dir)}:
+        visible = {r["name"] for r in list_reports(output_dir) if self.server.can_see(self.user, r["meta"].get("owner"))}
+        if name not in visible:
             return self._error(404, "Unknown report")
         md = (output_dir / f"{name}.md").read_text(encoding="utf-8-sig")
         js = output_dir / f"{name}.json"

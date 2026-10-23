@@ -36,3 +36,45 @@ def test_non_ascii_output_round_trips():
     assert r.ok, r.stderr
     assert "C ≈ 9967 bit/s, µ → ∞" in r.stdout
     assert r.result == {"note": "≈"}
+
+
+def test_sandbox_runner_round_trip():
+    import threading
+    from http.server import HTTPServer
+
+    from science_agent.tools import sandbox_server
+    from science_agent.tools.sandbox import RemoteSandbox
+
+    srv = HTTPServer(("127.0.0.1", 0), sandbox_server.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        remote = RemoteSandbox(f"http://127.0.0.1:{srv.server_address[1]}")
+        r = remote("import json\nprint('RESULT_JSON: ' + json.dumps({'v': 2 + 2}))", timeout=30)
+        assert r.ok and r.result == {"v": 4}
+        r = remote("raise SystemExit('nope')", timeout=30)
+        assert not r.ok and "nope" in r.stderr
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_unreachable_runner_reports_a_failed_script():
+    from science_agent.tools.sandbox import RemoteSandbox
+
+    r = RemoteSandbox("http://127.0.0.1:9")("print(1)", timeout=1)
+    assert not r.ok and "unreachable" in r.summary()
+
+
+def test_background_processes_do_not_outlive_the_script(tmp_path):
+    import os
+    import sys
+
+    if os.name != "posix":
+        return
+    marker = tmp_path / "survivor"
+    child = f"import time, pathlib; time.sleep(1.5); pathlib.Path({str(marker)!r}).write_text('x')"
+    code = f"import subprocess, sys\nsubprocess.Popen([sys.executable, '-c', {child!r}])\nprint('started')\n"
+    assert run_python(code, timeout=30).ok
+    import time
+    time.sleep(2.5)
+    assert not marker.exists()

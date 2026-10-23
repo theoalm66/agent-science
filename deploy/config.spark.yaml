@@ -1,0 +1,33 @@
+# Pandora on the DGX Spark, shared through Tailscale. Copy to config.yaml next to
+# docker-compose.yml and fill in the three places marked TODO.
+
+llm:
+  provider: openai_compatible
+  base_url: http://192.168.2.84:8008/v1   # vLLM container on the Spark
+  # TODO: the exact model id vLLM serves; list it with: curl -s http://192.168.2.84:8008/v1/models
+  model: nvidia/Qwen3.6-35B-A3B-NVFP4
+  json_mode: true
+  max_tokens: 8192
+  timeout: 900
+
+literature:
+  enabled: true
+  max_results: 5
+  semantic_scholar_api_key_env: S2_API_KEY   # set S2_API_KEY in .env next to docker-compose.yml
+
+compute:
+  enabled: true
+  timeout: 60
+  sandbox_url: http://sandbox:8090           # the isolated runner container
+
+output_dir: /data/reports
+
+server:
+  mode: shared
+  # TODO: your Tailscale login (shown in the Tailscale admin console under Users).
+  admins:
+    - you@example.com
+  # TODO: the https address that "tailscale serve" prints, e.g. https://thinkstationpgx-afbe.tail1234.ts.net
+  allowed_origins:
+    - https://thinkstationpgx-afbe.YOUR-TAILNET.ts.net
+  max_runs_per_user: 2

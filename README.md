@@ -208,6 +208,16 @@ and run `/assess-idea <your idea>`. It reuses the prompts and knowledge base fro
 `literature-scout` (search) and `critic` (adversarial review in a fresh context). Reports go to
 `reports/` in the same format, so the two routes can be compared.
 
+## Sharing Pandora from a server (Docker + Tailscale)
+
+`docker-compose.yml` runs Pandora with a separate, locked-down sandbox container for the
+model-written Python (no network, read-only filesystem, unprivileged, resource limits). In
+`server.mode: shared`, Pandora identifies people by the `Tailscale-User-Login` header that
+Tailscale Serve sets: logins in `server.admins` have full rights, everyone else is a guest who
+uses the server's model, cannot edit prompts or import, sees only their own runs, and waits in a
+queue (`max_runs_per_user`). Step-by-step setup for the DGX Spark, including Tailscale sharing
+and access rules: [docs/SPARK.md](docs/SPARK.md).
+
 ## Safety note on the compute stage
 
 The compute stage executes model-written Python in a subprocess with a time limit, a 4 GB memory

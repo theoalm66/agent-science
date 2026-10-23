@@ -1,0 +1,49 @@
+# Pandora on a server (e.g. the DGX Spark), shared through Tailscale Serve.
+# Setup and the Tailscale steps: docs/SPARK.md
+#
+#   cp deploy/config.spark.yaml config.yaml   # then edit admins, tailnet name, model
+#   docker compose up -d --build
+#   sudo tailscale serve --bg 8765
+services:
+  pandora:
+    build: .
+    image: pandora-science-agent
+    restart: unless-stopped
+    # Only on localhost: people reach Pandora through Tailscale Serve, which sets the identity
+    # header. Anything that could reach this port directly could fake that header.
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - pandora-data:/data
+    environment:
+      S2_API_KEY: ${S2_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      RHK_API_KEY: ${RHK_API_KEY:-}
+    networks: [default, sandbox]
+    depends_on: [sandbox]
+
+  # Runs the model-written Python. No route to the internet or your home network (internal
+  # network), read-only filesystem, unprivileged user, no capabilities, hard resource limits.
+  sandbox:
+    image: pandora-science-agent
+    restart: unless-stopped
+    command: ["python", "-m", "science_agent.tools.sandbox_server", "--host", "0.0.0.0", "--port", "8090"]
+    user: "65534:65534"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 128
+    networks: [sandbox]
+
+networks:
+  sandbox:
+    internal: true
+
+volumes:
+  pandora-data:

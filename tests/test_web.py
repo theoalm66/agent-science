@@ -18,7 +18,7 @@ from .conftest import ScriptedLLM
 REPO = Path(__file__).resolve().parents[1]
 
 
-def make_server(root: Path):
+def make_server(root: Path, extra_config: str = ""):
     """A server on a free port whose prompts, skills and reports are copies under `root`."""
     project = root / "project"
     shutil.copytree(REPO / ".claude", project / ".claude")
@@ -27,7 +27,7 @@ def make_server(root: Path):
     shutil.copytree(REPO / "src" / "science_agent" / "prompts", prompts)
     cfg = root / "config.yaml"
     cfg.write_text(
-        f"output_dir: {json.dumps(str(root / 'reports'))}\nliterature:\n  enabled: false\n",
+        f"output_dir: {json.dumps(str(root / 'reports'))}\nliterature:\n  enabled: false\n" + extra_config,
         encoding="utf-8",
     )
     llm = ScriptedLLM()
@@ -79,10 +79,10 @@ def call(srv, method, path, body=None, headers=None):
         return e.code, json.loads(e.read())
 
 
-def wait_for_end(srv, run_id):
+def wait_for_end(srv, run_id, headers=None):
     deadline = time.time() + 10
     while time.time() < deadline:
-        _, snap = call(srv, "GET", f"/api/runs/{run_id}")
+        _, snap = call(srv, "GET", f"/api/runs/{run_id}", headers=headers)
         if any(e["kind"] == "end" for e in snap["events"]):
             return snap
         time.sleep(0.05)
@@ -242,3 +242,113 @@ def test_answers_to_clarifying_questions_rerun_the_idea(server):
 
 def test_rejects_malformed_clarifications(server):
     assert call(server, "POST", "/api/runs", {"idea": "x", "clarifications": "nope"})[0] == 400
+
+
+SHARED = """server:
+  mode: shared
+  admins: [boss@example.com]
+  allowed_origins: [https://spark.tailnet.ts.net]
+  max_runs_per_user: 1
+"""
+
+
+@pytest.fixture
+def shared(tmp_path):
+    srv = make_server(tmp_path, SHARED)
+    yield srv
+    srv.shutdown()
+    srv.server_close()
+
+
+def as_user(login):
+    return {"Tailscale-User-Login": login}
+
+
+def guest_run(srv, login, idea="A modulation that beats Shannon.", **extra):
+    status, res = call(srv, "POST", "/api/runs", {"idea": idea, **extra}, headers={
+        "Content-Type": "application/json", **as_user(login)})
+    assert status == 200, res
+    _, snap = call(srv, "GET", f"/api/runs/{res['id']}", headers=as_user(login))
+    deadline = time.time() + 10
+    while not any(e["kind"] == "end" for e in snap["events"]) and time.time() < deadline:
+        time.sleep(0.05)
+        _, snap = call(srv, "GET", f"/api/runs/{res['id']}", headers=as_user(login))
+    return res["id"], snap
+
+
+def test_shared_mode_requires_the_tailscale_identity(shared):
+    status, res = call(shared, "GET", "/api/config")
+    assert status == 403 and "Tailscale" in res["error"]
+    _, cfg = call(shared, "GET", "/api/config", headers=as_user("guest@example.com"))
+    assert cfg["mode"] == "shared" and cfg["admin"] is False
+    assert "base_url" not in cfg["llm"] and "output_dir" not in cfg  # no server internals for guests
+    _, cfg = call(shared, "GET", "/api/config", headers=as_user("Boss@Example.com"))
+    assert cfg["admin"] is True and "output_dir" in cfg
+
+
+def test_guests_cannot_change_the_server_or_its_prompts(shared):
+    g = {"Content-Type": "application/json", **as_user("guest@example.com")}
+    assert call(shared, "POST", "/api/versions/save", {"key": "prompt:system", "text": "x"}, headers=g)[0] == 403
+    assert call(shared, "POST", "/api/import", {"format": "pandora-export"}, headers=g)[0] == 403
+    assert call(shared, "POST", "/api/models", {"base_url": "http://192.168.0.1/v1"}, headers=g)[0] == 403
+    _, bundle = call(shared, "POST", "/api/export", {"runs": "all", "versions": True}, headers=g)
+    assert bundle["versions"] == {"items": {}}
+
+
+def test_guests_use_the_server_model_and_see_only_their_own_runs(shared):
+    run_a, snap = guest_run(shared, "alice@example.com", llm={"base_url": "http://evil.example/v1", "model": "x"},
+                            s2_api_key="stolen")
+    assert snap["status"] == "done", snap["error"]
+    # The browser's endpoint, model and keys were ignored for a guest.
+    assert shared.seen_configs[-1].llm.base_url != "http://evil.example/v1"
+    assert shared.seen_configs[-1].llm.model != "x"
+    start = next(e for e in snap["events"] if e["kind"] == "start")
+    assert start["base_url"] is None
+    assert snap["result"]["assessment"]["meta"]["owner"] == "alice@example.com"
+
+    bob = as_user("bob@example.com")
+    assert call(shared, "GET", f"/api/runs/{run_a}", headers=bob)[0] == 404
+    assert call(shared, "GET", "/api/reports", headers=bob)[1] == []
+    name = call(shared, "GET", "/api/reports", headers=as_user("alice@example.com"))[1][0]["name"]
+    assert call(shared, "GET", f"/api/reports/{name}", headers=bob)[0] == 404
+    assert call(shared, "GET", f"/api/reports/{name}", headers=as_user("boss@example.com"))[0] == 200
+    assert call(shared, "GET", "/api/runs/current", headers=bob)[1] == {"run": None}
+
+
+def test_tailscale_origin_is_accepted_and_others_are_not(shared):
+    base = {"Content-Type": "application/json", **as_user("alice@example.com")}
+    ok = call(shared, "POST", "/api/export", {"runs": []}, headers={**base, "Origin": "https://spark.tailnet.ts.net"})
+    assert ok[0] == 200
+    bad = call(shared, "POST", "/api/export", {"runs": []}, headers={**base, "Origin": "https://evil.example"})
+    assert bad[0] == 403
+
+
+def test_runs_queue_up_with_positions_and_a_per_user_limit(tmp_path):
+    srv = make_server(tmp_path, SHARED.replace("max_runs_per_user: 1", "max_runs_per_user: 2"))
+    gate = threading.Event()
+    original = srv.llm.complete
+
+    def slow(system, user):
+        gate.wait(5)
+        return original(system, user)
+
+    srv.llm.complete = slow
+    try:
+        h = {"Content-Type": "application/json", **as_user("carol@example.com")}
+        first = call(srv, "POST", "/api/runs", {"idea": "one"}, headers=h)[1]["id"]
+        second = call(srv, "POST", "/api/runs", {"idea": "two"}, headers=h)[1]["id"]
+        status, res = call(srv, "POST", "/api/runs", {"idea": "three"}, headers=h)
+        assert status == 409 and "limit 2" in res["error"]
+        time.sleep(0.2)
+        snap = call(srv, "GET", f"/api/runs/{second}", headers=as_user("carol@example.com"))[1]
+        assert snap["status"] == "queued" and snap["queue_position"] == 1
+        # Cancelling a queued run removes it at once.
+        assert call(srv, "POST", f"/api/runs/{second}/cancel", {}, headers=h)[0] == 200
+        snap = call(srv, "GET", f"/api/runs/{second}", headers=as_user("carol@example.com"))[1]
+        assert snap["status"] == "cancelled"
+        gate.set()
+        assert wait_for_end(srv, first, as_user("carol@example.com"))["status"] == "done"
+    finally:
+        gate.set()
+        srv.shutdown()
+        srv.server_close()

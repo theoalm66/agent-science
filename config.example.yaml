@@ -63,6 +63,11 @@ compute:
   timeout: 60                        # seconds per script
   max_attempts: 2                    # retries with the error fed back
 
+# Sharing with other people (Docker + Tailscale Serve): see deploy/config.spark.yaml and docs/SPARK.md.
+# server:
+#   mode: shared
+#   admins: [you@example.com]
+
 output_dir: reports
 
 # Longest idea text accepted (characters). ~4 characters per token; the model context

@@ -41,6 +41,22 @@ class ComputeConfig(BaseModel):
     enabled: bool = True
     timeout: float = 60
     max_attempts: int = 2
+    # URL of the sandbox runner (python -m science_agent.tools.sandbox_server). When set, model-written
+    # scripts run there instead of in a local subprocess, e.g. in the isolated container of docker-compose.
+    sandbox_url: str | None = None
+
+
+class ServerConfig(BaseModel):
+    """How Pandora is shared. "local": one user on this machine. "shared": several people behind
+    Tailscale Serve, identified by the Tailscale-User-Login header that Serve sets (and strips from
+    clients), so Pandora must only be reachable through Serve (bind it to localhost)."""
+
+    mode: Literal["local", "shared"] = "local"
+    admins: list[str] = Field(default_factory=list)  # Tailscale logins with full rights
+    identity_header: str = "Tailscale-User-Login"
+    # Origins a browser may POST from besides http://<Host>, e.g. the https://<machine>.<tailnet>.ts.net URL.
+    allowed_origins: list[str] = Field(default_factory=list)
+    max_runs_per_user: int = 2  # queued plus running, per person
 
 
 class Config(BaseModel):
@@ -49,6 +65,7 @@ class Config(BaseModel):
     domain: str = "information_theory"
     literature: LiteratureConfig = Field(default_factory=LiteratureConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
+    server: ServerConfig = Field(default_factory=ServerConfig)
     output_dir: Path = Path("reports")
     # About 4 characters per token: 200k characters is ~50k tokens, which the model's
     # context window (e.g. vLLM --max-model-len) must also hold next to the prompt.

@@ -355,7 +355,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
   // ---------------------------------------------------------------- constants
 
   var PRESETS = [
-    { id:"spark", label:"DGX Spark (vLLM)", provider:"openai_compatible", base_url:"http://192.168.2.84:8000/v1",
+    { id:"spark", label:"DGX Spark (vLLM)", provider:"openai_compatible", base_url:"http://192.168.2.84:8008/v1",
       model:"nvidia/Qwen3.6-35B-A3B-NVFP4", json_mode:true,
       hint:"vLLM in Docker on the ThinkStation PGX (thinkstationpgx-afbe). No key needed unless vLLM was started with --api-key." },
     { id:"lmstudio", label:"LM Studio (this PC)", provider:"openai_compatible", base_url:"http://localhost:1234/v1",
@@ -500,6 +500,8 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
   // ---------------------------------------------------------------- state
 
   var serverConfig = null;    // GET /api/config
+  // A guest of a shared Pandora: server-side model, no settings, prompt editing or import.
+  function isGuest(){ return !!serverConfig && serverConfig.admin === false; }
   var lib = { prompts:[], domains:[], skills:[], benchmarks:[] };
   var reports = [];
   var settings = load("pandora_settings", null);
@@ -831,10 +833,14 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
   }
 
   function runHint(){
+    if(run && run.status === "running" && run.queue_position){
+      return "queued · position "+run.queue_position+" · runs start one after another";
+    }
     if(run && run.status === "running"){
       var start = run.events.length ? run.events[0].t : Date.now()/1000;
       return "running for "+fmtDuration(Date.now()/1000 - start)+" · "+(currentStage() || "starting");
     }
+    if(isGuest()) return serverConfig.llm.model+" · signed in as "+serverConfig.user+" · Ctrl+Enter to run";
     var target = settings.provider === "anthropic" ? "Anthropic API" : settings.base_url;
     return settings.model ? settings.model+" @ "+target+" · Ctrl+Enter to run" : "Configure a model in ⚙ first";
   }
@@ -1012,7 +1018,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     if(opts.idea){ runForm.idea = opts.idea; store("pandora_draft", runForm.idea); }
     var idea = (runForm.idea || "").trim();
     if(!idea){ $("ideaInput").focus(); return; }
-    if(!settings.model){ openSettings(true); flashNote("Choose a model first", true); return; }
+    if(!isGuest() && !settings.model){ openSettings(true); flashNote("Choose a model first", true); return; }
     clearTrace();
     try{
       var res = await api("POST", "/api/runs", {
@@ -1050,10 +1056,11 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     try{
       var snap = await api("GET", "/api/runs/"+run.id+"?since="+run.events.length);
       snap.events.forEach(function(e){ run.events.push(e); addTrace(e); });
-      run.result = snap.result; run.error = snap.error;
+      run.result = snap.result; run.error = snap.error; run.queue_position = snap.queue_position;
       var ended = run.events.some(function(e){ return e.kind === "end"; });
       run.status = ended ? snap.status : "running";
-      if(run.status === "running") setStatus("live", "running · "+(currentStage() || "starting")+" · "+settings.model);
+      if(run.status === "running") setStatus("live", run.queue_position ? "queued · position "+run.queue_position
+        : "running · "+(currentStage() || "starting")+" · "+(isGuest() ? serverConfig.llm.model : settings.model));
       if(ended){
         clearInterval(pollTimer); clearInterval(tickTimer);
         if(run.status === "done") setStatus("ok", "done · "+(run.result && run.result.assessment.verdict ? run.result.assessment.verdict.verdict : ""));
@@ -1174,7 +1181,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     var ed = editorFor(e.key), h = [];
     var previewing = ed.preview != null && ed.preview !== e.active ? versionOf(e, ed.preview) : null;
     h.push('<div class="ws-actions">'+versionBadge(e)+
-      (ed.open ? "" : '<button class="btn small" type="button" data-act="edit">Edit</button>')+
+      (ed.open || isGuest() ? "" : '<button class="btn small" type="button" data-act="edit">Edit</button>')+
       '<button class="btn secondary small" type="button" data-act="copy">Copy text</button>'+
       (ed.flash ? '<span class="save-note">'+esc(ed.flash)+"</span>" : "")+"</div>");
     if(ed.open){
@@ -1209,8 +1216,8 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
           '<span class="vbtns">'+
             (isActive ? "" : '<button class="link-btn" type="button" data-act="preview" data-n="'+v.n+'">view</button>')+
             (isActive ? "" : '<button class="link-btn" type="button" data-act="compare" data-n="'+v.n+'">compare</button>')+
-            (isActive ? "" : '<button class="link-btn" type="button" data-act="activate" data-n="'+v.n+'">activate</button>')+
-            (isActive || isFirst ? "" : '<button class="link-btn danger" type="button" data-act="delete" data-n="'+v.n+'">delete</button>')+
+            (isActive || isGuest() ? "" : '<button class="link-btn" type="button" data-act="activate" data-n="'+v.n+'">activate</button>')+
+            (isActive || isFirst || isGuest() ? "" : '<button class="link-btn danger" type="button" data-act="delete" data-n="'+v.n+'">delete</button>')+
           "</span></li>";
       }).join("")+"</ul>");
     }
@@ -1508,7 +1515,8 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     switch(e.kind){
       case "start":
         cls = "now";
-        text = "Run started · "+e.model+(e.base_url && e.provider !== "anthropic" ? " @ "+e.base_url : " (Anthropic)")+" · "+e.domain+
+        text = (e.queue_position > 1 ? "Run queued (position "+e.queue_position+") · " : "Run started · ")+e.model+
+               (e.base_url && e.provider !== "anthropic" ? " @ "+e.base_url : (e.provider === "anthropic" ? " (Anthropic)" : ""))+" · "+e.domain+
                " · literature "+(e.literature ? "on" : "off")+" · compute "+(e.compute ? "on" : "off");
         if(e.prompt_versions) detail = "Prompt versions frozen for this run:\n" + Object.keys(e.prompt_versions).map(function(k){
           var pv = e.prompt_versions[k]; return "  "+k+": "+(pv.version ? "v"+pv.version : "unversioned")+"  #"+pv.hash;
@@ -1525,6 +1533,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
         detail = e.response;
         break;
       case "info": text = e.message; break;
+      case "dequeued": cls = "now"; text = "Your run is starting"; break;
       case "search_start": text = "search: "+e.queries.length+(e.queries.length === 1 ? " query" : " queries")+" on arXiv + Semantic Scholar"; detail = e.queries.join("\n"); break;
       case "search_result":
         text = "search: "+plural(e.count, "paper")+" found";
@@ -1586,7 +1595,12 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       if(!settings) settings = settingsFromConfig(serverConfig);
       settings.keys = settings.keys || {};
       fillSettingsForm();
-      $("configPath").textContent = serverConfig.config_file + (serverConfig.config_exists ? "" : " (not found, using built-in defaults)");
+      if(isGuest()){
+        $("settingsBtn").hidden = true;
+        setStatus("ok", "signed in as "+serverConfig.user+" · "+serverConfig.llm.model);
+      } else {
+        $("configPath").textContent = serverConfig.config_file + (serverConfig.config_exists ? "" : " (not found, using built-in defaults)");
+      }
       var current = results[3].run;
       if(current){
         run = { id: current.id, status: "running", events: [], result: null, error: null };
@@ -1596,7 +1610,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       routeFromHash(false);
       renderRack(); renderWorkspace();
       window.addEventListener("hashchange", function(){ routeFromHash(true); });
-      if(!current) checkConnection();
+      if(!current && !isGuest()) checkConnection();
     }catch(e){
       setStatus("err", "Pandora server not reachable");
       ws.innerHTML = '<div class="error-box">Cannot reach the Pandora server: '+esc(e.message)+"\n\nStart it with:  .venv\\Scripts\\pandora</div>";
