@@ -170,7 +170,12 @@ zwischen „Server model“ und „My own API“.
   direkt angesprochen (Schutz gegen DNS-Rebinding). Weiterleitungen werden nicht verfolgt.
 - **Hochschul-API nur intern erreichbar?** Dann steht ihr Name in `server.guest_allowed_hosts` in
   `config.yaml` (zum Beispiel `[api.ai.rh-koeln.de]`). Für diese Hosts gilt die Prüfung nicht, auch
-  `http` ist dort erlaubt. Trage nur Hosts ein, denen du vertraust.
+  `http` ist dort erlaubt. Trage nur Hosts ein, denen du vertraust. Mit `host:port` (zum Beispiel
+  `"192.168.2.84:8008"`) gilt die Freigabe nur für diesen Port.
+- **Preset „DGX Spark (vLLM)“:** Gäste können damit ihr eigenes Profil auf den lokalen vLLM-Server
+  (`http://192.168.2.84:8008/v1`, ohne API-Key) legen, zum Beispiel mit anderen Einstellungen als
+  das Servermodell. Das funktioniert nur, wenn `"192.168.2.84:8008"` in `guest_allowed_hosts`
+  steht (in `deploy/config.spark.yaml` bereits eingetragen). Danach `docker compose up -d --build`.
 - **Eigene Warteschlange:** Läufe auf der eigenen API eines Gastes belasten die Spark nicht und
   warten deshalb nicht hinter den Läufen auf dem Servermodell. Bis zu `external_workers` (Standard
   3) laufen nebeneinander. Je Person gilt weiter `max_runs_per_user`.

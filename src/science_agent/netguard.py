@@ -41,6 +41,12 @@ def _check_address(ip_text: str, host: str) -> None:
         )
 
 
+def is_allowed(allowed: set[str], host: str, port: int) -> bool:
+    """`allowed` holds lower-case entries: `host` (any port) or `host:port` (only that port)."""
+    host = host.lower()
+    return host in allowed or f"{host}:{port}" in allowed
+
+
 def resolve_public(host: str, port: int, resolver: Resolver = socket.getaddrinfo) -> list[str]:
     """Addresses for `host`, all of which must be public. Raises EndpointNotAllowed otherwise."""
     try:
@@ -79,7 +85,7 @@ def check_public_endpoint(
         port = parts.port or (443 if parts.scheme == "https" else 80)
     except ValueError as e:
         raise EndpointNotAllowed("The endpoint URL has an invalid port") from e
-    if host.lower() in allowed:
+    if is_allowed(allowed, host, port):
         return url.rstrip("/")
     if parts.scheme != "https":
         raise EndpointNotAllowed("The endpoint must use https, otherwise your key would be sent unencrypted")
@@ -102,9 +108,9 @@ class SafeTransport(httpx.BaseTransport):
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
-        if host.lower() in self.allowed:
-            return self.inner.handle_request(request)
         port = request.url.port or (443 if request.url.scheme == "https" else 80)
+        if is_allowed(self.allowed, host, port):
+            return self.inner.handle_request(request)
         address = resolve_public(host, port, self.resolver)[0]
         extensions = dict(request.extensions)
         extensions["sni_hostname"] = host  # TLS name and certificate check use the real host name

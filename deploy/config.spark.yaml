@@ -35,7 +35,10 @@ server:
   # Only public https endpoints are accepted. A host that is only reachable internally (a
   # university API, for example) has to be allowed here by name.
   guests_may_use_own_api: true
-  guest_allowed_hosts: []        # e.g. [api.ai.rh-koeln.de]
+  # "host" allows every port, "host:port" only that one. The vLLM entry makes the guests' preset
+  # "DGX Spark (vLLM)" work; nothing else on the Spark is reachable for guests.
+  guest_allowed_hosts:
+    - "192.168.2.84:8008"        # add e.g. api.ai.rh-koeln.de if that API is only reachable internally
   guest_max_tokens: 64000
   guest_max_timeout: 600         # seconds per model call
   external_workers: 3            # runs on guests' own APIs that may run side by side

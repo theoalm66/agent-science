@@ -131,3 +131,17 @@ def test_redirects_are_not_followed():
     client = safe_client()
     assert client.follow_redirects is False
     client.close()
+
+
+def test_allowed_entry_with_port_only_exempts_that_port():
+    internal = resolver_for("192.168.2.84")
+    url = "http://192.168.2.84:8008/v1"
+    assert check_public_endpoint(url, ["192.168.2.84:8008"], resolver=internal) == url
+    with pytest.raises(EndpointNotAllowed):
+        check_public_endpoint("http://192.168.2.84:22/v1", ["192.168.2.84:8008"], resolver=internal)
+    seen = []
+    client = httpx.Client(transport=_transport(seen, resolver=internal, allowed=["192.168.2.84:8008"]))
+    assert client.get("http://192.168.2.84:8008/v1/models").status_code == 200
+    with pytest.raises(EndpointNotAllowed):
+        client.get("http://192.168.2.84:2375/version")
+    assert len(seen) == 1

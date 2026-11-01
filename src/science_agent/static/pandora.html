@@ -753,6 +753,8 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       hint:"Key from aistudio.google.com. Click Load models and pick a gemini-… model." },
     { id:"rhkoeln", label:"RH Köln AI", provider:"openai_compatible", base_url:"https://api.ai.rh-koeln.de/v1", max_tokens:8192, json_mode:false,
       hint:"Your access token for api.ai.rh-koeln.de. If the endpoint is refused as internal, ask the Pandora administrator to allow the host." },
+    { id:"spark", label:"DGX Spark (vLLM)", provider:"openai_compatible", base_url:"http://192.168.2.84:8008/v1", max_tokens:8192, json_mode:false,
+      hint:"The local vLLM server on the DGX Spark. No API key needed. Click Load models and pick the model. Works only if the administrator allowed 192.168.2.84:8008 in server.guest_allowed_hosts." },
     { id:"anthropic", label:"Anthropic API", provider:"anthropic", base_url:"", max_tokens:16000, json_mode:false,
       hint:"Key from console.anthropic.com." },
     { id:"custom", label:"Own endpoint", provider:"openai_compatible", base_url:"", max_tokens:8192, json_mode:false,
