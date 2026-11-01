@@ -10,10 +10,11 @@ See README.md for usage.
   (literature search, sandbox), `bench.py` + `benchmarks/*.yaml` (calibration),
   `web.py` + `static/pandora.html` (Pandora web UI: stdlib HTTP server around the pipeline),
   `versions.py` (version history of prompts/skills/agents; the active version is the file on disk),
-  `tools/sandbox_server.py` (sandbox runner for the isolated container).
+  `tools/sandbox_server.py` (sandbox runner for the isolated container),
+  `netguard.py` (SSRF guard for guest-supplied endpoints), `profiles.py` (guests' API settings, Fernet-encrypted).
 - Deployment: `Dockerfile` + `docker-compose.yml` (pandora + sandbox), config in `deploy/`, guide in
   `docs/SPARK.md`. Shared mode trusts the `Tailscale-User-Login` header, so Pandora must stay bound
-  to localhost behind Tailscale Serve.
+  to localhost behind Tailscale Serve. Never let a guest-supplied URL be requested without `netguard.SafeTransport`.
 - Tests must never edit the real prompt or `.claude/` files: give `PandoraServer`/`VersionStore` copies (see tests/test_web.py).
 - Keep the LLM interface text-in/text-out: no native tool calling, so local models keep working.
 - Every prompt file must start with `# Stage: <name>`; the test fake LLM dispatches on it.

@@ -163,7 +163,7 @@ class Pipeline:
         self.literature_search = literature if config.literature.enabled else None
 
     @staticmethod
-    def _build_llms(config: Config) -> dict[str, LLM]:
+    def _build_llms(config: Config, client=None) -> dict[str, LLM]:
         """One client per distinct LLM config, shared by the stages that use it."""
         cache: dict[str, LLM] = {}
         llms = {}
@@ -171,7 +171,7 @@ class Pipeline:
             cfg = config.llm_for(stage)
             key = cfg.model_dump_json()
             if key not in cache:
-                cache[key] = make_llm(cfg)
+                cache[key] = make_llm(cfg, client)
             llms[stage] = cache[key]
         return llms
 

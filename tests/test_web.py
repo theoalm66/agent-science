@@ -7,9 +7,11 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 
 from science_agent.config import STAGES
 from science_agent.tools.sandbox import RunResult
+from science_agent.profiles import Profile, ProfileStore
 from science_agent.versions import VersionStore
 from science_agent.web import PandoraServer
 
@@ -43,6 +45,7 @@ def make_server(root: Path, extra_config: str = ""):
         llm_factory=factory,
         sandbox=lambda code, timeout: RunResult(True, "C 6.6e6\n", "", {"value": 6.6e6}),
         store=VersionStore(root / "data" / "versions.json", prompts, project),
+        profiles=ProfileStore(root / "data" / "profiles", Fernet.generate_key()),
     )
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     srv.seen_configs, srv.llm, srv.prompts_dir = seen_configs, llm, prompts
@@ -290,7 +293,8 @@ def test_guests_cannot_change_the_server_or_its_prompts(shared):
     g = {"Content-Type": "application/json", **as_user("guest@example.com")}
     assert call(shared, "POST", "/api/versions/save", {"key": "prompt:system", "text": "x"}, headers=g)[0] == 403
     assert call(shared, "POST", "/api/import", {"format": "pandora-export"}, headers=g)[0] == 403
-    assert call(shared, "POST", "/api/models", {"base_url": "http://192.168.0.1/v1"}, headers=g)[0] == 403
+    status, res = call(shared, "POST", "/api/models", {"base_url": "http://192.168.0.1/v1"}, headers=g)
+    assert status == 400 and "private" in res["error"].lower() or "https" in res["error"].lower()
     _, bundle = call(shared, "POST", "/api/export", {"runs": "all", "versions": True}, headers=g)
     assert bundle["versions"] == {"items": {}}
 
@@ -348,6 +352,150 @@ def test_runs_queue_up_with_positions_and_a_per_user_limit(tmp_path):
         assert snap["status"] == "cancelled"
         gate.set()
         assert wait_for_end(srv, first, as_user("carol@example.com"))["status"] == "done"
+    finally:
+        gate.set()
+        srv.shutdown()
+        srv.server_close()
+
+
+# -- guests with their own API -----------------------------------------------------------------
+
+OWN_URL = "https://93.184.216.34/v1"  # a public IP literal: no DNS lookup needed in tests
+OWN_KEY = "sk-guest-key-0123456789"
+
+
+def guest_headers(login):
+    return {"Content-Type": "application/json", **as_user(login)}
+
+
+def save_profile(srv, login, **fields):
+    body = {"provider": "openai_compatible", "base_url": OWN_URL, "model": "own-model",
+            "api_key": OWN_KEY, **fields}
+    return call(srv, "POST", "/api/profile", body, headers=guest_headers(login))
+
+
+def test_profile_is_private_to_the_guest_and_encrypted_on_disk(shared, tmp_path):
+    status, res = save_profile(shared, "alice@example.com", s2_api_key="s2k-guest")
+    assert status == 200, res
+    assert res["profile"]["has_api_key"] and "api_key" not in res["profile"] and OWN_KEY not in json.dumps(res)
+
+    _, mine = call(shared, "GET", "/api/profile", headers=as_user("alice@example.com"))
+    assert mine["enabled"] and mine["profile"]["model"] == "own-model" and mine["profile"]["api_key_hint"] == "…6789"
+    assert OWN_KEY not in json.dumps(mine)
+    assert call(shared, "GET", "/api/profile", headers=as_user("bob@example.com"))[1]["profile"] is None
+
+    stored = b"".join(p.read_bytes() for p in (tmp_path / "data" / "profiles").iterdir())
+    assert stored and OWN_KEY.encode() not in stored and b"93.184.216.34" not in stored and b"s2k-guest" not in stored
+
+    # Updating without retyping the key keeps it.
+    status, res = save_profile(shared, "alice@example.com", api_key="", model="other-model")
+    assert status == 200 and res["profile"]["has_api_key"] and res["profile"]["model"] == "other-model"
+
+    assert call(shared, "POST", "/api/profile/delete", {}, headers=guest_headers("alice@example.com"))[1] == {"deleted": True}
+    assert call(shared, "GET", "/api/profile", headers=as_user("alice@example.com"))[1]["profile"] is None
+
+
+@pytest.mark.parametrize("url", [
+    "https://192.168.2.84:8008/v1",
+    "https://127.0.0.1:8765/v1",
+    "https://100.116.110.73/v1",
+    "http://93.184.216.34/v1",
+])
+def test_guests_cannot_point_pandora_at_internal_or_unencrypted_endpoints(shared, url):
+    status, res = save_profile(shared, "mallory@example.com", base_url=url)
+    assert status == 400, res
+    assert call(shared, "GET", "/api/profile", headers=as_user("mallory@example.com"))[1]["profile"] is None
+    status, res = call(shared, "POST", "/api/models", {"base_url": url}, headers=guest_headers("mallory@example.com"))
+    assert status == 400
+
+
+def test_admin_allowed_hosts_may_be_internal(tmp_path):
+    srv = make_server(tmp_path, SHARED + "  guest_allowed_hosts: [api.hochschule.test]\n")
+    try:
+        status, res = save_profile(srv, "carol@example.com", base_url="http://api.hochschule.test/v1")
+        assert status == 200, res
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_admin_has_no_profile_and_the_feature_can_be_switched_off(shared, tmp_path):
+    assert call(shared, "POST", "/api/profile", {"model": "m"}, headers=guest_headers("boss@example.com"))[0] == 403
+    assert call(shared, "GET", "/api/profile", headers=as_user("boss@example.com"))[1]["enabled"] is False
+
+    off = make_server(tmp_path / "off", SHARED + "  guests_may_use_own_api: false\n")
+    try:
+        assert save_profile(off, "alice@example.com")[0] == 403
+        assert call(off, "GET", "/api/profile", headers=as_user("alice@example.com"))[1]["enabled"] is False
+    finally:
+        off.shutdown()
+        off.server_close()
+
+
+def test_a_run_on_the_guests_own_api_uses_only_their_settings(shared):
+    save_profile(shared, "alice@example.com", s2_api_key="s2k-guest", max_tokens=5000, timeout=120)
+    run_id, snap = guest_run(shared, "alice@example.com", llm_source="own",
+                             llm={"base_url": "http://evil.example/v1", "model": "evil", "api_key": "stolen"})
+    assert snap["status"] == "done", snap["error"]
+    cfg = shared.seen_configs[-1]
+    assert (cfg.llm.base_url, cfg.llm.model, cfg.llm.api_key()) == (OWN_URL, "own-model", OWN_KEY)
+    assert cfg.llm.max_tokens == 5000 and cfg.llm.timeout == 120
+    assert cfg.stages == {}  # the server's per-stage models (and their keys) do not apply
+    start = next(e for e in snap["events"] if e["kind"] == "start")
+    assert start["base_url"] == OWN_URL and start["source"] == "own"
+    meta = snap["result"]["assessment"]["meta"]
+    assert meta["llm_source"] == "own-api" and meta["owner"] == "alice@example.com"
+    assert OWN_KEY not in json.dumps(snap) and "s2k-guest" not in json.dumps(snap)
+    # The server's model is untouched for the next run.
+    _, snap = guest_run(shared, "alice@example.com")
+    assert shared.seen_configs[-1].llm.model != "own-model"
+
+
+def test_own_api_run_needs_a_saved_profile_and_rechecks_the_endpoint(shared):
+    h = guest_headers("dave@example.com")
+    status, res = call(shared, "POST", "/api/runs", {"idea": "x", "llm_source": "own"}, headers=h)
+    assert status == 400 and "Save your own API settings" in res["error"]
+    save_profile(shared, "dave@example.com")
+    # The administrator tightens the rules afterwards: the saved endpoint is refused at run time.
+    shared.profiles.save("dave@example.com", Profile(base_url="https://10.0.0.7/v1", model="m", api_key=OWN_KEY))
+    status, res = call(shared, "POST", "/api/runs", {"idea": "x", "llm_source": "own"}, headers=h)
+    assert status == 400 and "private or internal" in res["error"]
+
+
+def test_server_keys_are_never_used_for_a_guests_requests(shared, monkeypatch):
+    from science_agent import web
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server-anthropic-key")
+    calls = []
+    monkeypatch.setattr(web, "list_models", lambda *a, **k: calls.append(a) or [])
+    status, res = call(shared, "POST", "/api/models", {"provider": "anthropic"}, headers=guest_headers("eve@example.com"))
+    assert status == 400 and "your Anthropic API key" in res["error"] and calls == []
+
+    save_profile(shared, "eve@example.com")
+    call(shared, "POST", "/api/models", {"base_url": OWN_URL}, headers=guest_headers("eve@example.com"))
+    assert calls[-1][2] == OWN_KEY  # the key she saved for exactly this endpoint
+    call(shared, "POST", "/api/models", {"base_url": "https://8.8.8.8/v1"}, headers=guest_headers("eve@example.com"))
+    assert calls[-1][2] is None  # a different endpoint does not get her key
+
+
+def test_runs_on_the_guests_own_api_do_not_wait_for_the_server_model(tmp_path):
+    srv = make_server(tmp_path, SHARED.replace("max_runs_per_user: 1", "max_runs_per_user: 3"))
+    gate = threading.Event()
+    slow, fast = ScriptedLLM(), ScriptedLLM()
+    original = slow.complete
+    slow.complete = lambda system, user: (gate.wait(10), original(system, user))[1]
+    srv.llm_factory = lambda cfg: {s: (fast if cfg.llm.model == "own-model" else slow) for s in STAGES}
+    try:
+        save_profile(srv, "carol@example.com")
+        h = guest_headers("carol@example.com")
+        blocked = call(srv, "POST", "/api/runs", {"idea": "on the server model"}, headers=h)[1]["id"]
+        mine = call(srv, "POST", "/api/runs", {"idea": "on my own api", "llm_source": "own"}, headers=h)[1]["id"]
+        done = wait_for_end(srv, mine, as_user("carol@example.com"))
+        assert done["status"] == "done"
+        still = call(srv, "GET", f"/api/runs/{blocked}", headers=as_user("carol@example.com"))[1]
+        assert still["status"] == "running"  # the server-model run is still going
+        gate.set()
+        assert wait_for_end(srv, blocked, as_user("carol@example.com"))["status"] == "done"
     finally:
         gate.set()
         srv.shutdown()

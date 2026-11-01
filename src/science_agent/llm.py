@@ -205,7 +205,8 @@ def strip_think_tags(text: str) -> str:
     return text.strip()
 
 
-def make_llm(cfg: LLMConfig) -> LLM:
+def make_llm(cfg: LLMConfig, client: httpx.Client | None = None) -> LLM:
+    """`client` (OpenAI-compatible only) lets the caller restrict where requests may go."""
     if cfg.provider == "anthropic":
         return AnthropicLLM(cfg)
-    return OpenAICompatibleLLM(cfg)
+    return OpenAICompatibleLLM(cfg, client=client)

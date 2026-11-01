@@ -19,6 +19,8 @@ services:
       - sandbox-socket:/run/sandbox:ro
     environment:
       S2_API_KEY: ${S2_API_KEY:-}
+      # Encrypts the API keys that guests save. Keep it in .env, OUTSIDE the data volume (see docs/SPARK.md).
+      PANDORA_SECRET_KEY: ${PANDORA_SECRET_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       RHK_API_KEY: ${RHK_API_KEY:-}

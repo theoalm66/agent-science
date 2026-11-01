@@ -39,7 +39,9 @@ from .bench import load_benchmark
 from .config import Config, LLMConfig, load_config
 from .jsonutil import JSONExtractionError, extract_json
 from .llm import LLM
+from .netguard import EndpointNotAllowed, check_public_endpoint, safe_client
 from .pipeline import Pipeline, check_idea_length, compose_source, normalize_clarifications
+from .profiles import Profile, ProfileError, ProfileStore, clean_profile, load_master_key
 from .report import render_markdown, save
 from .tools.literature import LiteratureSearch
 from .tools.sandbox import RemoteSandbox, RunResult, run_python
@@ -86,6 +88,7 @@ class Run:
         self.owner = owner
         self.status = "queued"  # queued | running | done | error | cancelled
         self.queue_position: int | None = None
+        self.lane = "local"  # "local": the server's own model (one at a time); "own": a guest's API
         self.events: list[dict] = []
         self.result: dict | None = None
         self.error: str | None = None
@@ -258,7 +261,7 @@ def list_reports(output_dir: Path) -> list[dict]:
     return reports
 
 
-def list_models(provider: str, base_url: str, key: str | None) -> list[dict]:
+def list_models(provider: str, base_url: str, key: str | None, client: httpx.Client | None = None) -> list[dict]:
     if provider == "anthropic":
         key = key or os.environ.get("ANTHROPIC_API_KEY")
         if not key:
@@ -273,7 +276,7 @@ def list_models(provider: str, base_url: str, key: str | None) -> list[dict]:
         if not base_url:
             raise ValueError("No endpoint URL")
         headers = {"Authorization": f"Bearer {key}"} if key else {}
-        resp = httpx.get(base_url.rstrip("/") + "/models", headers=headers, timeout=15)
+        resp = (client or httpx).get(base_url.rstrip("/") + "/models", headers=headers, timeout=15)
     if not resp.is_success:
         raise ValueError(f"HTTP {resp.status_code}: {resp.text[:300]}")
     return [
@@ -298,30 +301,53 @@ class PandoraServer(ThreadingHTTPServer):
         sandbox: Callable[[str, float], RunResult] | None = None,
         literature_factory: Callable[[Config, str | None], LiteratureSearch] | None = None,
         store: VersionStore | None = None,
+        profiles: ProfileStore | None = None,
     ):
         super().__init__(address, Handler)
         self.config_path = config_path
+        project = _project_dir()
+        self.data_dir = Path(os.environ.get("PANDORA_DATA_DIR") or project / "pandora-data")
+        self._profiles = profiles
         if store is None:
-            project = _project_dir()
-            data_dir = Path(os.environ.get("PANDORA_DATA_DIR") or project / "pandora-data")
             store = VersionStore(
-                data_dir / "versions.json",
+                self.data_dir / "versions.json",
                 Path(str(resources.files("science_agent") / "prompts")),
                 project,
             )
         self.store = store
         self.llm_factory = llm_factory or Pipeline._build_llms
+        self.custom_llm_factory = llm_factory is not None
         self.sandbox = sandbox
         self.literature_factory = literature_factory or (
             lambda cfg, key: LiteratureSearch(max_results=cfg.literature.max_results, s2_api_key=key)
         )
         self.runs: dict[str, Run] = {}
-        self.current: Run | None = None
         self.lock = threading.Lock()
-        # Runs execute one at a time, in order, on a single worker thread.
-        self.queue: collections.deque[tuple[Run, tuple]] = collections.deque()
         self.queue_ready = threading.Condition(self.lock)
-        threading.Thread(target=self._worker, daemon=True, name="pandora-worker").start()
+        # Two lanes, each a FIFO queue. "local" runs on the server's model, strictly one at a time.
+        # "own" runs use a guest's own API and do not load the server, so a few may run side by side.
+        self.lanes: dict[str, collections.deque] = {"local": collections.deque(), "own": collections.deque()}
+        try:
+            external = max(1, self.config().server.external_workers)
+        except Exception:  # an unreadable config is reported when a run starts
+            external = 1
+        for lane, workers in (("local", 1), ("own", external)):
+            for i in range(workers):
+                threading.Thread(target=self._worker, args=(lane,), daemon=True, name=f"pandora-{lane}-{i}").start()
+
+    @property
+    def profiles(self) -> ProfileStore:
+        """Encrypted guest profiles; created on first use so the key file only appears when needed."""
+        with self.lock:
+            if self._profiles is None:
+                self._profiles = ProfileStore(self.data_dir / "profiles", load_master_key(self.data_dir))
+            return self._profiles
+
+    def current_run_for(self, user: "User") -> "Run | None":
+        """The newest queued or running run of this person, for picking a run up after a page reload."""
+        with self.lock:
+            mine = [r for r in self.runs.values() if r.owner == user.login and r.status in ("queued", "running")]
+        return mine[-1] if mine else None
 
     def config(self) -> Config:
         return load_config(self.config_path)
@@ -372,14 +398,44 @@ class PandoraServer(ThreadingHTTPServer):
         s2_key = str(body.get("s2_api_key") or "").strip() or (os.environ.get(env) if env else None)
         return cfg, s2_key
 
+    def own_api_config(self, body: dict, user: User) -> tuple[Config, str | None, str]:
+        """Run settings for a guest using their own saved API: their endpoint, model and keys,
+        no per-stage overrides of the server. Returns (config, semantic scholar key, endpoint)."""
+        base = self.config()
+        if not base.server.guests_may_use_own_api:
+            raise ValueError("Using your own API is switched off on this server")
+        profile = self.profiles.load(user.login)
+        if profile is None:
+            raise ValueError("Save your own API settings first (⚙)")
+        cfg, s2_key = self.run_config({k: v for k, v in body.items() if k not in ("llm", "s2_api_key")})
+        allowed = cfg.server.guest_allowed_hosts
+        base_url = profile.base_url
+        if profile.provider == "openai_compatible":
+            try:
+                base_url = check_public_endpoint(profile.base_url, allowed)
+            except EndpointNotAllowed as e:
+                raise ValueError(str(e)) from e
+        cfg.llm = LLMConfig(
+            provider=profile.provider, base_url=base_url or None, model=profile.model,
+            temperature=profile.temperature, max_tokens=min(profile.max_tokens, cfg.server.guest_max_tokens),
+            timeout=min(profile.timeout, cfg.server.guest_max_timeout), json_mode=profile.json_mode,
+            effort=profile.effort, api_key_value=profile.api_key or None,
+        )
+        cfg.stages = {}
+        return cfg, (profile.s2_api_key or s2_key), base_url
+
     def start_run(self, body: dict, user: User = LOCAL_USER) -> Run:
         idea = str(body.get("idea") or "").strip()
         if not idea:
             raise ValueError("The idea is empty")
-        if not user.admin:
-            # Guests use the model, endpoint and keys configured on the server, nothing from the browser.
-            body = {k: v for k, v in body.items() if k not in ("llm", "s2_api_key")}
-        cfg, s2_key = self.run_config(body)
+        own = (not user.admin) and str(body.get("llm_source") or "server") == "own"
+        if own:
+            cfg, s2_key, _ = self.own_api_config(body, user)
+        else:
+            if not user.admin:
+                # On the server's model guests use its endpoint and keys, nothing from the browser.
+                body = {k: v for k, v in body.items() if k not in ("llm", "s2_api_key")}
+            cfg, s2_key = self.run_config(body)
         raw = body.get("clarifications") or []
         if not isinstance(raw, list):
             raise ValueError("clarifications must be a list of {question, answer}")
@@ -394,46 +450,50 @@ class PandoraServer(ThreadingHTTPServer):
             if len(active) >= limit:
                 raise RuntimeError(f"You already have {len(active)} run(s) queued or running (limit {limit})")
             run = Run(idea, clarifications, parent_run, owner=user.login)
+            run.lane = "own" if own else "local"
             self.runs[run.id] = run
             finished = [k for k, r in self.runs.items() if r.status not in ("queued", "running")]
             for old in finished[: max(0, len(self.runs) - KEEP_RUNS)]:
                 del self.runs[old]
-            self.queue.append((run, (cfg, s2_key, prompts, prompt_versions)))
-            self._renumber_queue()
-            self.queue_ready.notify()
+            self.lanes[run.lane].append((run, (cfg, s2_key, prompts, prompt_versions)))
+            self._renumber_queue(run.lane)
+            self.queue_ready.notify_all()
         run.emit(
             "start", provider=cfg.llm.provider, model=cfg.llm.model,
-            base_url=cfg.llm.base_url if user.admin else None,
+            # A guest never sees the server's endpoint, but always their own.
+            base_url=cfg.llm.base_url if (user.admin or own) else None,
+            source="own" if own else "server",
             domain=cfg.domain, literature=cfg.literature.enabled, compute=cfg.compute.enabled,
             prompt_versions=prompt_versions, queue_position=run.queue_position,
         )
         return run
 
-    def _renumber_queue(self) -> None:
+    def _renumber_queue(self, lane: str) -> None:
         """Positions as people see them: 1 = next to start. Call with the lock held."""
-        for i, (queued, _) in enumerate(self.queue, 1):
+        for i, (queued, _) in enumerate(self.lanes[lane], 1):
             queued.queue_position = i
 
     def cancel_run(self, run: Run) -> None:
         with self.lock:
             run.cancel.set()
-            queued = [item for item in self.queue if item[0] is run]
+            queue = self.lanes[run.lane]
+            queued = [item for item in queue if item[0] is run]
             if not queued:
                 return  # running: stops at its next model call
-            self.queue.remove(queued[0])
-            self._renumber_queue()
+            queue.remove(queued[0])
+            self._renumber_queue(run.lane)
             run.status, run.queue_position = "cancelled", None
         run.emit("end", status="cancelled")
 
-    def _worker(self) -> None:
+    def _worker(self, lane: str) -> None:
+        queue = self.lanes[lane]
         while True:
             with self.lock:
-                while not self.queue:
+                while not queue:
                     self.queue_ready.wait()
-                run, args = self.queue.popleft()
-                self._renumber_queue()
+                run, args = queue.popleft()
+                self._renumber_queue(lane)
                 run.status, run.queue_position = "running", None
-                self.current = run
             run.emit("dequeued")
             self._work(run, *args)
 
@@ -455,17 +515,22 @@ class PandoraServer(ThreadingHTTPServer):
             "prompt_versions": prompt_versions,
             "parent_run": run.parent_run,
             "owner": run.owner,
+            "llm_source": "own-api" if run.lane == "own" else "server",
         }
 
     def _work(self, run: Run, cfg: Config, s2_key: str | None, prompts: dict, prompt_versions: dict) -> None:
         handler = _RunLogHandler(run, threading.get_ident())
         logging.getLogger().addHandler(handler)
+        guard = None
         try:
             shared: dict[int, _RecordingLLM] = {}
-            llms = {
-                stage: shared.setdefault(id(llm), _RecordingLLM(llm, run))
-                for stage, llm in self.llm_factory(cfg).items()
-            }
+            if run.lane == "own" and not self.custom_llm_factory:
+                # The guest chose the endpoint: allow only public addresses (see netguard.py).
+                guard = safe_client(cfg.server.guest_allowed_hosts, cfg.llm.timeout)
+                raw_llms = Pipeline._build_llms(cfg, guard)
+            else:
+                raw_llms = self.llm_factory(cfg)
+            llms = {stage: shared.setdefault(id(llm), _RecordingLLM(llm, run)) for stage, llm in raw_llms.items()}
 
             base_sandbox = self.sandbox or (
                 RemoteSandbox(cfg.compute.sandbox_url) if cfg.compute.sandbox_url else run_python
@@ -504,6 +569,8 @@ class PandoraServer(ThreadingHTTPServer):
             run.status = "error"
         finally:
             logging.getLogger().removeHandler(handler)
+            if guard is not None:
+                guard.close()
             run.emit("end", status=run.status)
 
     # -- export / import -------------------------------------------------------
@@ -623,9 +690,10 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[:2] == ["api", "reports"]:
                 return self._report(parts[2])
             if parts == ["api", "runs", "current"]:
-                run = self.server.current
-                visible = run is not None and self.server.can_see(self.user, run.owner)
-                return self._json({"run": run.snapshot() if visible else None})
+                run = self.server.current_run_for(self.user)
+                return self._json({"run": run.snapshot() if run else None})
+            if parts == ["api", "profile"]:
+                return self._profile_get()
             if len(parts) == 3 and parts[:2] == ["api", "runs"]:
                 run = self._visible_run(parts[2])
                 if not run:
@@ -660,8 +728,12 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(body, dict):
             return self._error(400, "Expected a JSON object")
         try:
+            if parts == ["api", "profile"]:
+                return self._profile_save(body)
+            if parts == ["api", "profile", "delete"]:
+                return self._profile_delete()
             if parts == ["api", "models"]:
-                return self._admin_only() and self._models(body)
+                return self._models(body)
             if len(parts) == 3 and parts[:2] == ["api", "versions"]:
                 return self._admin_only() and self._versions(parts[2], body)
             if parts == ["api", "export"]:
@@ -731,6 +803,8 @@ class Handler(BaseHTTPRequestHandler):
         provider = str(body.get("provider") or "openai_compatible")
         base_url = str(body.get("base_url") or "").strip()
         key = str(body.get("api_key") or "").strip() or None
+        if not self.user.admin:
+            return self._guest_models(provider, base_url, key)
         if not key:  # fall back to the config's env key, but only for the endpoint it belongs to
             cfg = self.server.config().llm
             if cfg.provider == provider and (provider == "anthropic" or cfg.base_url == base_url):
@@ -739,6 +813,76 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"models": list_models(provider, base_url, key)})
         except (ValueError, httpx.HTTPError) as e:
             self._error(502, str(e) or type(e).__name__)
+
+    # -- guests' own API profile -------------------------------------------------
+
+    def _guest_only(self) -> bool:
+        if self.user.admin:
+            return self._error(403, "Only guests have a saved profile; the admin sets the connection in the settings") or False
+        if not self.server.config().server.guests_may_use_own_api:
+            return self._error(403, "Using your own API is switched off on this server") or False
+        return True
+
+    def _guest_models(self, provider: str, base_url: str, key: str | None) -> None:
+        """Model list from the guest's own endpoint. Never falls back to the server's keys, and
+        only talks to public addresses."""
+        if not self._guest_only():
+            return
+        cfg = self.server.config()
+        try:
+            stored = self.server.profiles.load(self.user.login)
+            if not key and stored and stored.provider == provider and (provider == "anthropic" or stored.base_url == base_url.rstrip("/")):
+                key = stored.api_key or None  # the key they saved for exactly this endpoint
+            if provider == "anthropic":
+                if not key:  # list_models would otherwise fall back to the server's own Anthropic key
+                    raise ProfileError("Enter your Anthropic API key first")
+                return self._json({"models": list_models("anthropic", "", key)})
+            url = check_public_endpoint(base_url, cfg.server.guest_allowed_hosts)
+            with safe_client(cfg.server.guest_allowed_hosts, 15) as client:
+                self._json({"models": list_models(provider, url, key, client)})
+        except (ValueError, ProfileError, httpx.HTTPError) as e:
+            self._error(400 if isinstance(e, (EndpointNotAllowed, ProfileError)) else 502, str(e) or type(e).__name__)
+
+    def _profile_get(self) -> None:
+        cfg = self.server.config()
+        info = {
+            "enabled": bool(cfg.server.guests_may_use_own_api) and not self.user.admin,
+            "server_model": {"provider": cfg.llm.provider, "model": cfg.llm.model},
+            "limits": {"max_tokens": cfg.server.guest_max_tokens, "timeout": cfg.server.guest_max_timeout},
+            "profile": None,
+        }
+        if info["enabled"]:
+            try:
+                profile = self.server.profiles.load(self.user.login)
+            except ProfileError as e:
+                info["error"] = str(e)
+                profile = None
+            info["profile"] = profile.public() if profile else None
+        self._json(info)
+
+    def _profile_save(self, body: dict) -> None:
+        if not self._guest_only():
+            return
+        cfg = self.server.config()
+        allowed = cfg.server.guest_allowed_hosts
+        try:
+            try:
+                current = self.server.profiles.load(self.user.login)
+            except ProfileError:
+                current = None  # unreadable old file: saving replaces it
+            profile = clean_profile(
+                body, current, lambda url: check_public_endpoint(url, allowed),
+                cfg.server.guest_max_tokens, cfg.server.guest_max_timeout,
+            )
+            self.server.profiles.save(self.user.login, profile)
+        except (EndpointNotAllowed, ProfileError) as e:
+            return self._error(400, str(e))
+        self._json({"profile": profile.public()})
+
+    def _profile_delete(self) -> None:
+        if not self._guest_only():
+            return
+        self._json({"deleted": self.server.profiles.delete(self.user.login)})
 
     def _versions(self, action: str, body: dict) -> None:
         store, key = self.server.store, str(body.get("key") or "")

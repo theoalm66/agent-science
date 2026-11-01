@@ -330,6 +330,59 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     <p class="hint">With “include API keys” the file contains them in plain text. Do not share such a file.</p>
   </section>
 
+  <section class="panel settings" id="guestPanel" hidden>
+    <h2>My API</h2>
+    <p class="hint" id="guestIntro"></p>
+    <div class="preset-row" id="gPresetRow"></div>
+    <p class="hint" id="gPresetHint"></p>
+    <div class="field-grid">
+      <div class="field">
+        <label for="gProvider">Provider</label>
+        <select id="gProvider">
+          <option value="openai_compatible">OpenAI-compatible endpoint</option>
+          <option value="anthropic">Anthropic API</option>
+        </select>
+      </div>
+      <div class="field" id="gUrlField">
+        <label for="gBaseUrl">Endpoint URL (https, ends in /v1)</label>
+        <input id="gBaseUrl" type="text" placeholder="https://api.example.com/v1" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="gApiKey">API key</label>
+        <div class="key-wrap">
+          <input id="gApiKey" type="password" placeholder="" autocomplete="off">
+          <button type="button" data-toggle="gApiKey">SHOW</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="gModel">Model</label>
+        <input id="gModel" list="gModelList" placeholder="click “Load models”" autocomplete="off">
+        <datalist id="gModelList"></datalist>
+      </div>
+    </div>
+    <div class="field-grid tight">
+      <div class="field"><label for="gMaxTok">Max output tokens</label><input id="gMaxTok" type="number" step="256" min="256"></div>
+      <div class="field"><label for="gTimeout">Timeout per call (s)</label><input id="gTimeout" type="number" step="30" min="10"></div>
+      <div class="field"><span class="label">Output</span><label class="check"><input type="checkbox" id="gJson"> JSON mode</label></div>
+    </div>
+    <div class="field-grid">
+      <div class="field">
+        <label for="gS2">Semantic Scholar API key (optional)</label>
+        <div class="key-wrap">
+          <input id="gS2" type="password" placeholder="" autocomplete="off">
+          <button type="button" data-toggle="gS2">SHOW</button>
+        </div>
+      </div>
+    </div>
+    <div class="settings-actions">
+      <button class="btn secondary" id="gLoadModels" type="button">Load models</button>
+      <button class="btn" id="gSave" type="button">Save</button>
+      <button class="btn secondary" id="gDelete" type="button">Delete my saved settings</button>
+      <span class="save-note" id="gNote" hidden></span>
+    </div>
+    <p class="hint">Your key and endpoint are stored <strong>encrypted on the Pandora server</strong> and are never shown again (only the last four characters). They are used only for your own runs and are sent only to the endpoint you entered. The operator of this server holds the encryption key, so use a key with a spending limit and delete it when you are done. Only public https endpoints work; addresses inside the server's network are blocked.</p>
+  </section>
+
   <main class="layout">
     <aside class="panel skills">
       <h2>Library</h2>
@@ -667,11 +720,12 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
   });
 
   function openSettings(open){
-    $("settingsPanel").hidden = !open;
+    var panel = isGuest() ? $("guestPanel") : $("settingsPanel");
+    panel.hidden = !open;
     $("settingsBtn").setAttribute("aria-expanded", String(open));
-    if(open) fillSettingsForm();
+    if(open) (isGuest() ? fillGuestForm : fillSettingsForm)();
   }
-  $("settingsBtn").addEventListener("click", function(){ openSettings($("settingsPanel").hidden); });
+  $("settingsBtn").addEventListener("click", function(){ openSettings((isGuest() ? $("guestPanel") : $("settingsPanel")).hidden); });
 
   async function checkConnection(){
     if(run && run.status === "running") return;
@@ -686,6 +740,120 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       setStatus("err", "not reachable · "+truncate(e.message, 80));
     }
   }
+
+  // ---------------------------------------------------------------- guest: my own API
+
+  // A guest of a shared Pandora can run on the server's model or on their own API. The key and
+  // endpoint live encrypted on the server; the browser only ever sees whether a key is set.
+  var guest = { source: load("pandora_guest_source", "server"), info: null, profile: null, models: [] };
+  var GUEST_PRESETS = [
+    { id:"openai", label:"OpenAI (ChatGPT)", provider:"openai_compatible", base_url:"https://api.openai.com/v1", max_tokens:16000, json_mode:true,
+      hint:"Key from platform.openai.com (billed separately from a ChatGPT subscription). Click Load models and pick a chat model." },
+    { id:"gemini", label:"Google Gemini", provider:"openai_compatible", base_url:"https://generativelanguage.googleapis.com/v1beta/openai", max_tokens:16000, json_mode:false,
+      hint:"Key from aistudio.google.com. Click Load models and pick a gemini-… model." },
+    { id:"rhkoeln", label:"RH Köln AI", provider:"openai_compatible", base_url:"https://api.ai.rh-koeln.de/v1", max_tokens:8192, json_mode:false,
+      hint:"Your access token for api.ai.rh-koeln.de. If the endpoint is refused as internal, ask the Pandora administrator to allow the host." },
+    { id:"anthropic", label:"Anthropic API", provider:"anthropic", base_url:"", max_tokens:16000, json_mode:false,
+      hint:"Key from console.anthropic.com." },
+    { id:"custom", label:"Own endpoint", provider:"openai_compatible", base_url:"", max_tokens:8192, json_mode:false,
+      hint:"Any public OpenAI-compatible https endpoint that ends in /v1: OpenRouter, a university API, your own server with a public address, …" }
+  ];
+
+  function gv(id){ return $(id).value.trim(); }
+  function gNote(text, bad){
+    var n = $("gNote"); n.textContent = text; n.className = "save-note"+(bad ? " bad" : ""); n.hidden = false;
+    clearTimeout(gNote.t); gNote.t = setTimeout(function(){ n.hidden = true; }, 4000);
+  }
+
+  function fillGuestForm(){
+    var p = guest.profile, info = guest.info || {}, lim = info.limits || {};
+    $("guestIntro").textContent = "Runs use the server's model ("+((info.server_model || {}).model || "?")+") unless you choose “My own API” in the run form. "+
+      (p ? "Saved: "+p.model+(p.base_url ? " @ "+p.base_url : " (Anthropic)")+"." : "Nothing saved yet.")+
+      (lim.max_tokens ? " Limits: up to "+Number(lim.max_tokens).toLocaleString()+" output tokens and "+lim.timeout+" s per call." : "");
+    if(info.error) $("guestIntro").textContent += " "+info.error;
+    $("gProvider").value = p ? p.provider : "openai_compatible";
+    $("gBaseUrl").value = p ? p.base_url : "";
+    $("gModel").value = p ? p.model : "";
+    $("gMaxTok").value = p ? p.max_tokens : 8192;
+    $("gTimeout").value = p ? p.timeout : 300;
+    $("gJson").checked = p ? !!p.json_mode : false;
+    $("gApiKey").value = ""; $("gS2").value = "";
+    $("gApiKey").placeholder = p && p.has_api_key ? "saved ("+p.api_key_hint+"), leave empty to keep" : "your API key";
+    $("gS2").placeholder = p && p.has_s2_api_key ? "saved, leave empty to keep" : "x-api-key";
+    $("gUrlField").hidden = $("gProvider").value === "anthropic";
+  }
+
+  function guestPayload(){
+    return { provider: $("gProvider").value, base_url: gv("gBaseUrl"), model: gv("gModel"), api_key: gv("gApiKey"),
+             s2_api_key: gv("gS2"), max_tokens: Number($("gMaxTok").value), timeout: Number($("gTimeout").value),
+             json_mode: $("gJson").checked };
+  }
+
+  function refreshGuestStatus(){
+    var own = guest.source === "own" && guest.profile;
+    setStatus("ok", "signed in as "+serverConfig.user+" · "+(own ? guest.profile.model+" (own API)" : serverConfig.llm.model));
+  }
+
+  async function loadGuestProfile(){
+    try{
+      guest.info = await api("GET", "/api/profile");
+      guest.profile = guest.info.profile;
+    }catch(e){ guest.info = { error: e.message }; guest.profile = null; }
+    if(!guest.profile && guest.source === "own") guest.source = "server";
+    $("gPresetRow").hidden = !(guest.info && guest.info.enabled);
+    fillGuestForm(); refreshGuestStatus();
+  }
+
+  GUEST_PRESETS.forEach(function(p){
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "preset-btn"; b.textContent = p.label; b.dataset.id = p.id;
+    b.addEventListener("click", function(){
+      Array.prototype.forEach.call($("gPresetRow").children, function(x){ x.className = "preset-btn"+(x === b ? " active" : ""); });
+      $("gProvider").value = p.provider; $("gBaseUrl").value = p.base_url; $("gModel").value = "";
+      $("gMaxTok").value = p.max_tokens; $("gJson").checked = p.json_mode;
+      $("gUrlField").hidden = p.provider === "anthropic";
+      $("gPresetHint").textContent = p.hint;
+    });
+    $("gPresetRow").appendChild(b);
+  });
+  $("gProvider").addEventListener("change", function(){ $("gUrlField").hidden = this.value === "anthropic"; });
+
+  $("gLoadModels").addEventListener("click", async function(){
+    var btn = this; btn.disabled = true;
+    try{
+      var body = guestPayload();
+      var data = await api("POST", "/api/models", { provider: body.provider, base_url: body.base_url, api_key: body.api_key });
+      guest.models = data.models || [];
+      var dl = $("gModelList"); dl.innerHTML = "";
+      guest.models.forEach(function(m){ var o = document.createElement("option"); o.value = m.id; dl.appendChild(o); });
+      if(!$("gModel").value && guest.models.length) $("gModel").value = guest.models[0].id;
+      gNote(plural(guest.models.length, "model")+" found");
+    }catch(e){ gNote(e.message, true); }
+    btn.disabled = false;
+  });
+
+  $("gSave").addEventListener("click", async function(){
+    var btn = this; btn.disabled = true;
+    try{
+      var data = await api("POST", "/api/profile", guestPayload());
+      var first = !guest.profile;
+      guest.profile = data.profile;
+      if(first){ guest.source = "own"; store("pandora_guest_source", guest.source); }
+      fillGuestForm(); refreshGuestStatus(); renderWorkspace();
+      gNote("saved (encrypted on the server)");
+    }catch(e){ gNote(e.message, true); }
+    btn.disabled = false;
+  });
+
+  $("gDelete").addEventListener("click", async function(){
+    if(!guest.profile || !confirm("Delete your saved API settings and key from the server?")) return;
+    try{
+      await api("POST", "/api/profile/delete", {});
+      guest.profile = null; guest.source = "server"; store("pandora_guest_source", "server");
+      fillGuestForm(); refreshGuestStatus(); renderWorkspace();
+      gNote("deleted");
+    }catch(e){ gNote(e.message, true); }
+  });
 
   // ---------------------------------------------------------------- library rack
 
@@ -806,6 +974,9 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
         '<div class="field"><label for="domainInput">Knowledge base</label><select id="domainInput"'+(running?" disabled":"")+">"+domains.map(function(d){ return '<option value="'+esc(d)+'"'+(d===runForm.domain?" selected":"")+">"+esc(d)+"</option>"; }).join("")+"</select></div>" +
         '<div class="field"><span class="label">Tools</span><label class="check"><input type="checkbox" id="litInput"'+(runForm.literature?" checked":"")+(running?" disabled":"")+"> literature search</label></div>" +
         '<div class="field"><span class="label">&nbsp;</span><label class="check"><input type="checkbox" id="compInput"'+(runForm.compute?" checked":"")+(running?" disabled":"")+"> run Python check</label></div>" +
+        (isGuest() && guest.info && guest.info.enabled ? '<div class="field"><label for="sourceInput">Model</label><select id="sourceInput"'+(running?" disabled":"")+">"+
+          '<option value="server"'+(guest.source === "server" ? " selected" : "")+">Server model ("+esc(serverConfig.llm.model)+")</option>"+
+          '<option value="own"'+(guest.source === "own" ? " selected" : "")+(guest.profile ? "" : " disabled")+">My own API"+(guest.profile ? " ("+esc(guest.profile.model)+")" : " (set up in ⚙)")+"</option></select></div>" : "") +
       "</div>" +
       '<div class="ws-actions">' +
         '<button class="btn" id="runBtn" type="button"'+(running?" disabled":"")+">"+(running ? "Running…" : "Run Pandora")+"</button>" +
@@ -823,6 +994,9 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     $("domainInput").addEventListener("change", function(){ runForm.domain = this.value; });
     $("litInput").addEventListener("change", function(){ runForm.literature = this.checked; });
     $("compInput").addEventListener("change", function(){ runForm.compute = this.checked; });
+    if($("sourceInput")) $("sourceInput").addEventListener("change", function(){
+      guest.source = this.value; store("pandora_guest_source", guest.source); refreshGuestStatus(); $("runHint").textContent = runHint();
+    });
     $("runBtn").addEventListener("click", function(){ startRun(); });
     if(run && run.result) wireClarify(run.result.assessment, run.id);
     if($("cancelBtn")) $("cancelBtn").addEventListener("click", cancelRun);
@@ -840,7 +1014,10 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       var start = run.events.length ? run.events[0].t : Date.now()/1000;
       return "running for "+fmtDuration(Date.now()/1000 - start)+" · "+(currentStage() || "starting");
     }
-    if(isGuest()) return serverConfig.llm.model+" · signed in as "+serverConfig.user+" · Ctrl+Enter to run";
+    if(isGuest()){
+      var own = guest.source === "own" && guest.profile;
+      return (own ? guest.profile.model+" (your own API)" : serverConfig.llm.model)+" · signed in as "+serverConfig.user+" · Ctrl+Enter to run";
+    }
     var target = settings.provider === "anthropic" ? "Anthropic API" : settings.base_url;
     return settings.model ? settings.model+" @ "+target+" · Ctrl+Enter to run" : "Configure a model in ⚙ first";
   }
@@ -1019,10 +1196,12 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     var idea = (runForm.idea || "").trim();
     if(!idea){ $("ideaInput").focus(); return; }
     if(!isGuest() && !settings.model){ openSettings(true); flashNote("Choose a model first", true); return; }
+    if(isGuest() && guest.source === "own" && !guest.profile){ openSettings(true); gNote("Save your API settings first", true); return; }
     clearTrace();
     try{
       var res = await api("POST", "/api/runs", {
-        idea: idea, llm: llmPayload(), s2_api_key: settings.s2_api_key,
+        idea: idea, llm: isGuest() ? undefined : llmPayload(), s2_api_key: isGuest() ? undefined : settings.s2_api_key,
+        llm_source: isGuest() ? guest.source : undefined,
         domain: runForm.domain, literature: runForm.literature, compute: runForm.compute,
         clarifications: opts.clarifications || [], parent_run: opts.parent_run || null
       });
@@ -1596,8 +1775,8 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       settings.keys = settings.keys || {};
       fillSettingsForm();
       if(isGuest()){
-        $("settingsBtn").hidden = true;
-        setStatus("ok", "signed in as "+serverConfig.user+" · "+serverConfig.llm.model);
+        await loadGuestProfile();
+        $("settingsBtn").title = "My API";
       } else {
         $("configPath").textContent = serverConfig.config_file + (serverConfig.config_exists ? "" : " (not found, using built-in defaults)");
       }

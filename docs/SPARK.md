@@ -139,6 +139,47 @@ Von einem Gast-Gerät aus (oder du lädst dich mit einem zweiten Account selbst 
 - Ein Lauf des Gastes erscheint bei dir als Admin in der Bibliothek, beim Gast nur dessen eigene
   Läufe.
 
+## Eigene API-Zugänge der Gäste
+
+Gäste können im ⚙ („My API“) ihren eigenen Endpunkt und API-Schlüssel eintragen, zum Beispiel
+OpenAI, Gemini, die Hochschul-API oder einen eigenen Server. Im Lauf-Formular wählen sie dann
+zwischen „Server model“ und „My own API“.
+
+- **Verschlüsselt gespeichert:** Pandora legt pro Gast eine Datei unter `/data/pandora-data/profiles/`
+  ab (Fernet: AES mit Authentifizierung). Dateiname und Inhalt verraten weder Login noch Schlüssel
+  noch Adresse. Der Browser bekommt den Schlüssel nie zurück, nur die letzten vier Zeichen.
+- **Der Hauptschlüssel** kommt aus `PANDORA_SECRET_KEY`. Erzeuge ihn einmal und lege ihn in `.env`,
+  also **außerhalb** des Docker-Volumes, damit eine Kopie des Volumes (Backup, Snapshot) die
+  Schlüssel der Gäste nicht preisgibt:
+  ```bash
+  echo "PANDORA_SECRET_KEY=$(openssl rand -base64 32 | tr '+/' '-_')" >> .env
+  chmod 600 .env
+  docker compose up -d
+  ```
+  Ohne diese Variable erzeugt Pandora beim ersten Speichern eine Datei `secret.key` im Daten-Volume.
+  Das funktioniert, schützt aber nur vor zufälligem Mitlesen. **Ändere den Schlüssel nicht mehr**:
+  Sonst sind gespeicherte Profile unlesbar und die Gäste müssen ihre Eingaben wiederholen.
+- **Ehrlich gesagt:** Wer den Server betreibt (du) und `PANDORA_SECRET_KEY` kennt, könnte die
+  Schlüssel entschlüsseln. Sage Gästen, dass sie einen Schlüssel mit Ausgabenlimit verwenden und
+  ihn nach der Nutzung löschen sollen („Delete my saved settings“).
+- **Nur öffentliche https-Adressen.** Pandora schickt die Anfragen, und zwar aus deinem Heimnetz.
+  Ohne Schutz könnte ein Gast also `http://192.168.2.84:8008` (vLLM), den Router oder eine
+  Tailscale-Adresse eintragen. Deshalb werden Adressen im privaten Bereich, Loopback,
+  Link-Local und Tailscale (100.64.0.0/10) abgelehnt, ebenso Adressen mit Zugangsdaten oder
+  Query-Teil in der URL. Der Name wird bei jeder Anfrage neu aufgelöst und die geprüfte Adresse
+  direkt angesprochen (Schutz gegen DNS-Rebinding). Weiterleitungen werden nicht verfolgt.
+- **Hochschul-API nur intern erreichbar?** Dann steht ihr Name in `server.guest_allowed_hosts` in
+  `config.yaml` (zum Beispiel `[api.ai.rh-koeln.de]`). Für diese Hosts gilt die Prüfung nicht, auch
+  `http` ist dort erlaubt. Trage nur Hosts ein, denen du vertraust.
+- **Eigene Warteschlange:** Läufe auf der eigenen API eines Gastes belasten die Spark nicht und
+  warten deshalb nicht hinter den Läufen auf dem Servermodell. Bis zu `external_workers` (Standard
+  3) laufen nebeneinander. Je Person gilt weiter `max_runs_per_user`.
+- **Abschalten:** `guests_may_use_own_api: false` in `config.yaml`, dann
+  `docker compose restart pandora`.
+- **Grenzen für Gäste:** `guest_max_tokens` und `guest_max_timeout` begrenzen Antwortlänge und
+  Wartezeit pro Aufruf. Das Servermodell, seine Schlüssel und seine Stufen-Einstellungen aus
+  `config.yaml` werden für Läufe auf der eigenen API nie benutzt.
+
 ## Betrieb
 
 | Aufgabe | Befehl |

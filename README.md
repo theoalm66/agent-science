@@ -215,7 +215,8 @@ model-written Python (no network, read-only filesystem, unprivileged, resource l
 `server.mode: shared`, Pandora identifies people by the `Tailscale-User-Login` header that
 Tailscale Serve sets: logins in `server.admins` have full rights, everyone else is a guest who
 uses the server's model, cannot edit prompts or import, sees only their own runs, and waits in a
-queue (`max_runs_per_user`). Step-by-step setup for the DGX Spark, including Tailscale sharing
+queue (`max_runs_per_user`). Guests can also save their own endpoint and API key (OpenAI, Gemini,
+a university API, …), stored encrypted on the server and restricted to public https endpoints. Step-by-step setup for the DGX Spark, including Tailscale sharing
 and access rules: [docs/SPARK.md](docs/SPARK.md).
 
 ## Safety note on the compute stage

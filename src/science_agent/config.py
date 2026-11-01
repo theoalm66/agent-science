@@ -57,6 +57,15 @@ class ServerConfig(BaseModel):
     # Origins a browser may POST from besides http://<Host>, e.g. the https://<machine>.<tailnet>.ts.net URL.
     allowed_origins: list[str] = Field(default_factory=list)
     max_runs_per_user: int = 2  # queued plus running, per person
+    # Guests may store their own endpoint and API key (encrypted on the server) and run with them.
+    guests_may_use_own_api: bool = True
+    # Hosts guests may use even though they resolve to a private address (or only speak http),
+    # e.g. a university API that is only reachable internally. Everything else must be public https.
+    guest_allowed_hosts: list[str] = Field(default_factory=list)
+    guest_max_tokens: int = 64_000
+    guest_max_timeout: float = 600  # seconds per model call
+    # Runs on a guest's own API do not use the server's GPU, so several may run side by side.
+    external_workers: int = 3
 
 
 class Config(BaseModel):
