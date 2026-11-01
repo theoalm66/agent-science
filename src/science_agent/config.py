@@ -97,6 +97,9 @@ def load_config(path: str | Path | None = None) -> Config:
             raise FileNotFoundError(f"Config file not found: {p}")
         return Config()
     data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    misplaced = sorted(set(data) & set(ServerConfig.model_fields))
+    if misplaced:  # a server setting at the top level would otherwise be ignored without a word
+        raise ValueError(f"{misplaced} must be indented under 'server:' in the config file")
     unknown = set(data.get("stages") or {}) - set(STAGES)
     if unknown:
         raise ValueError(f"Unknown stage(s) in config: {sorted(unknown)}; valid: {STAGES}")

@@ -214,3 +214,13 @@ def test_responses_api_running_out_of_tokens_explains_itself():
     llm.api = "responses"
     with pytest.raises(LLMError, match="max_output_tokens.*raise max_tokens"):
         llm.complete("s", "u")
+
+
+def test_server_setting_at_the_top_level_is_reported(tmp_path):
+    import pytest
+    from science_agent.config import load_config
+
+    path = tmp_path / "c.yaml"
+    path.write_text('server:\n  mode: shared\nguest_allowed_hosts:\n  - "10.0.0.1:8008"\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="guest_allowed_hosts.*under 'server:'"):
+        load_config(path)
