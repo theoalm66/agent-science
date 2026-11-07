@@ -89,6 +89,7 @@ class Run:
         self.owner = owner
         self.resumable = False  # an interim result is on disk, so "Resume" can skip the finished stages
         self.resumed_from: str | None = None
+        self.live: dict | None = None  # what the model is writing right now (streamed models only)
         self.status = "queued"  # queued | running | done | error | cancelled
         self.queue_position: int | None = None
         self.lane = "local"  # "local": the server's own model (one at a time); "own": a guest's API
@@ -116,6 +117,7 @@ class Run:
             "result": self.result if self.status == "done" else None,
             "error": self.error,
             "resumable": self.resumable,
+            "live": self.live if self.status == "running" else None,
         }
 
 
@@ -132,7 +134,19 @@ class _RecordingLLM:
         stage = m.group(1) if m else "?"
         self.run.emit("llm_request", stage=stage, model=self.name, system=system, prompt=user)
         start = time.monotonic()
-        text = self.inner.complete(system, user)
+        if hasattr(self.inner, "on_progress"):
+            def progress(info: dict) -> None:
+                if self.run.cancel.is_set():
+                    raise RunCancelled()  # closes the stream, so the model server stops generating
+                self.run.live = {"stage": stage, **info}
+
+            self.inner.on_progress = progress
+        try:
+            text = self.inner.complete(system, user)
+        finally:
+            if hasattr(self.inner, "on_progress"):
+                self.inner.on_progress = None
+            self.run.live = None
         try:
             parsed = extract_json(text)
         except JSONExtractionError:

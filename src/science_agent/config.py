@@ -23,6 +23,10 @@ class LLMConfig(BaseModel):
     max_tokens: int = 8192
     timeout: float = 600
     json_mode: bool = False
+    # Receive the answer as it is written (chat completions only). `timeout` then limits the silence
+    # between two chunks instead of the whole call, a run shows what the model is writing, and Cancel
+    # stops the model. Leave off for gateways that do not support streaming.
+    stream: bool = False
     effort: str | None = "high"  # anthropic only
 
     def api_key(self) -> str | None:

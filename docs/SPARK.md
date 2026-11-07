@@ -185,6 +185,15 @@ zwischen „Server model“ und „My own API“.
   Wartezeit pro Aufruf. Das Servermodell, seine Schlüssel und seine Stufen-Einstellungen aus
   `config.yaml` werden für Läufe auf der eigenen API nie benutzt.
 
+## Live sehen, was das Modell tut
+
+Mit `stream: true` unter `llm:` (in `deploy/config.spark.yaml` gesetzt) empfängt Pandora die Antwort
+Stück für Stück. Im Lauf steht dann unter den Schritten eine Live-Zeile: Stufe, ob das Modell
+gerade denkt oder die Antwort schreibt, Tokens, Sekunden, Tokens pro Sekunde und die letzten
+Zeichen des Textes. Außerdem gilt `timeout` dann für die Stille zwischen zwei Stücken statt für den
+ganzen Aufruf, und **Cancel** stoppt das Modell wirklich (vLLM bricht die Anfrage ab). Hat ein
+Gateway Probleme mit Streaming, setze `stream: false`.
+
 ## Abgebrochene Läufe fortsetzen
 
 Nach jedem fertigen Schritt (Formalize, Literatursuche, Literature, Limits, Compute, Critic) speichert

@@ -8,7 +8,8 @@ llm:
   model: nvidia/Qwen3.6-35B-A3B-NVFP4
   json_mode: true
   max_tokens: 24576   # reasoning models count their thinking; 8192 ran out in the compute stage
-  timeout: 900
+  timeout: 900        # with stream: seconds of silence before a call is given up
+  stream: true        # see what the model writes while it works; Cancel then stops the model
 
 # Optional: give one stage its own limits. The compute prompt is long and a reasoning model can
 # think for a quarter of an hour before it writes the script; a shorter limit makes a stuck

@@ -987,6 +987,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       "</div>" +
       (serverConfig.stages && Object.keys(serverConfig.stages).length ? '<p class="hint">Per-stage overrides from config.yaml also apply: '+esc(Object.keys(serverConfig.stages).map(function(s){ return s+" → "+(serverConfig.stages[s].model||"…"); }).join(", "))+"</p>" : "") +
       '<div class="flow-steps" id="stageList">'+(run ? renderStages() : "")+"</div>" +
+      '<div id="liveBox">'+renderLive()+"</div>" +
       '<div id="resultBox">'+(run ? renderResult() : "")+"</div>" +
       '<div id="unfinishedBox">'+renderUnfinished()+"</div>";
     ws.innerHTML = html;
@@ -1168,6 +1169,17 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     if($("answerRunBtn")) $("answerRunBtn").addEventListener("click", function(){ answerAndRerun(a, parentId); });
   }
 
+  // What the model is writing right now (shown for models that stream).
+  function renderLive(){
+    var l = run && run.status === "running" ? run.live : null;
+    if(!l) return "";
+    var rate = l.seconds > 0 ? Math.round(l.chunks / l.seconds) : 0;
+    return '<div class="hint" style="margin-top:8px"><strong>'+esc(l.stage)+"</strong>: model is "+(l.phase === "thinking" ? "thinking" : "writing the answer")+
+      " · ~"+l.chunks.toLocaleString()+" tokens · "+Math.round(l.seconds)+" s · ~"+rate+" tokens/s · "+
+      l.thinking_chars.toLocaleString()+" characters of thinking, "+l.answer_chars.toLocaleString()+" of answer</div>" +
+      '<pre style="max-height:9em;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:.78rem;opacity:.8;margin:4px 0">'+esc(l.tail)+"</pre>";
+  }
+
   // Unfinished runs: the finished stages are kept on the server, so a run can continue after an outage.
   var unfinished = [];
   var STAGE_NAMES = { formalization:"formalize", literature:"literature", limits:"limits", computation:"compute", critique:"critic" };
@@ -1223,6 +1235,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     // Re-render fully when the running state flips; otherwise only the live parts.
     if(!form || form.disabled !== !!running) return renderRun();
     $("stageList").innerHTML = run ? renderStages() : "";
+    if($("liveBox")) $("liveBox").innerHTML = renderLive();
     $("resultBox").innerHTML = run ? renderResult() : "";
     $("runHint").textContent = runHint();
   }
@@ -1276,7 +1289,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       var snap = await api("GET", "/api/runs/"+run.id+"?since="+run.events.length);
       snap.events.forEach(function(e){ run.events.push(e); addTrace(e); });
       run.result = snap.result; run.error = snap.error; run.queue_position = snap.queue_position;
-      run.resumable = snap.resumable;
+      run.resumable = snap.resumable; run.live = snap.live;
       var ended = run.events.some(function(e){ return e.kind === "end"; });
       run.status = ended ? snap.status : "running";
       if(run.status === "running") setStatus("live", run.queue_position ? "queued · position "+run.queue_position

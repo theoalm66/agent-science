@@ -7,9 +7,10 @@ tool calling, which many local models implement poorly.
 
 from __future__ import annotations
 
+import json
 import re
 import time
-from typing import Protocol
+from typing import Callable, Protocol
 
 import httpx
 
@@ -24,6 +25,17 @@ class LLM(Protocol):
     name: str
 
     def complete(self, system: str, user: str) -> str: ...
+
+
+class _Reply:
+    """What a streamed call looks like to `complete`: the parts of httpx.Response it uses."""
+
+    def __init__(self, status_code: int, data: dict):
+        self.status_code, self.text, self._data = status_code, "", data
+        self.is_success = 200 <= status_code < 300
+
+    def json(self) -> dict:
+        return self._data
 
 
 class OpenAICompatibleLLM:
@@ -49,6 +61,49 @@ class OpenAICompatibleLLM:
         # "chat" (/chat/completions) or "responses" (/responses). OpenAI serves some models, such
         # as the *-pro ones, only through the Responses API; we switch when the server says so.
         self.api = "chat"
+        # Called about once a second while a streamed answer arrives; may raise to stop the call.
+        self.on_progress: Callable[[dict], None] | None = None
+
+    def _stream_post(self, url: str, body: dict):
+        """POST with stream=true and fold the chunks back into an ordinary chat-completion reply."""
+        content: list[str] = []
+        reasoning: list[str] = []
+        finish = None
+        chunks = 0
+        start = last = time.monotonic()
+        with self.client.stream("POST", url, json={**body, "stream": True}, headers=self.headers) as resp:
+            if not resp.is_success:
+                resp.read()
+                return resp
+            for line in resp.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    choice = (json.loads(payload).get("choices") or [{}])[0]
+                except (ValueError, AttributeError, IndexError):
+                    continue
+                delta = choice.get("delta") or {}
+                if delta.get("content"):
+                    content.append(delta["content"])
+                thought = delta.get("reasoning_content") or delta.get("reasoning")
+                if thought:
+                    reasoning.append(thought)
+                finish = choice.get("finish_reason") or finish
+                chunks += 1
+                now = time.monotonic()
+                if self.on_progress and now - last >= 1.0:
+                    last = now
+                    answer, thinking = "".join(content), "".join(reasoning)
+                    self.on_progress({
+                        "chunks": chunks, "seconds": round(now - start, 1),
+                        "answer_chars": len(answer), "thinking_chars": len(thinking),
+                        "phase": "thinking" if not answer or ("<think>" in answer and "</think>" not in answer) else "answering",
+                        "tail": (thinking + answer)[-600:],
+                    })
+        return _Reply(resp.status_code, {"choices": [{"message": {"content": "".join(content)}, "finish_reason": finish}]})
 
     def _body(self, system: str, user: str) -> dict:
         body: dict = {
@@ -104,12 +159,15 @@ class OpenAICompatibleLLM:
             else:
                 url, body = self.cfg.base_url.rstrip("/") + "/chat/completions", self._body(system, user)
             try:
-                resp = self.client.post(url, json=body, headers=self.headers)
+                if self.cfg.stream and self.api == "chat":
+                    resp = self._stream_post(url, body)
+                else:
+                    resp = self.client.post(url, json=body, headers=self.headers)
             except httpx.ReadTimeout as e:
                 # The server took the request but did not answer in time (usually a reasoning model
                 # still thinking). Asking again would only queue the same long job a second time.
                 raise LLMError(
-                    f"{self.cfg.model} gave no answer within {self.cfg.timeout:.0f} s ({url}). Not retried: "
+                    f"{self.cfg.model} sent nothing for {self.cfg.timeout:.0f} s ({url}). Not retried: "
                     "the model is probably still generating. Lower max_tokens or raise the timeout for this stage."
                 ) from e
             except httpx.TransportError as e:

@@ -235,7 +235,7 @@ def test_a_read_timeout_is_not_retried_but_connection_errors_are(monkeypatch):
         raise httpx.ReadTimeout("timed out", request=request)
 
     llm = OpenAICompatibleLLM(LLMConfig(base_url="http://x/v1", model="m"), client=httpx.Client(transport=httpx.MockTransport(slow)))
-    with pytest.raises(LLMError, match="no answer within.*Not retried"):
+    with pytest.raises(LLMError, match="sent nothing for.*Not retried"):
         llm.complete("s", "u")
     assert len(calls) == 1
 
@@ -249,3 +249,65 @@ def test_a_read_timeout_is_not_retried_but_connection_errors_are(monkeypatch):
     with pytest.raises(LLMError, match="Cannot reach"):
         llm.complete("s", "u")
     assert len(calls) == 4  # the first try plus three retries
+
+
+def _sse(*events):
+    return "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
+
+
+def test_streamed_answer_is_assembled_and_reports_progress(monkeypatch):
+    sent = {}
+
+    def handler(request):
+        sent["body"] = json.loads(request.content)
+        text = _sse(
+            {"choices": [{"delta": {"reasoning_content": "let me think "}}]},
+            {"choices": [{"delta": {"content": '{"a":'}}]},
+            {"choices": [{"delta": {"content": " 1}"}, "finish_reason": "stop"}]},
+        )
+        return httpx.Response(200, text=text, headers={"Content-Type": "text/event-stream"})
+
+    ticks = iter([0.0, 0.0, 1.5, 2.0, 3.0, 4.0, 5.0, 6.0])
+    monkeypatch.setattr("science_agent.llm.time.monotonic", lambda: next(ticks, 9.0))
+    seen = []
+    llm = OpenAICompatibleLLM(LLMConfig(base_url="http://x/v1", model="m", stream=True),
+                              client=httpx.Client(transport=httpx.MockTransport(handler)))
+    llm.on_progress = seen.append
+    assert llm.complete("s", "u") == '{"a": 1}'
+    assert sent["body"]["stream"] is True
+    assert seen and seen[0]["thinking_chars"] > 0 and seen[0]["phase"] in ("thinking", "answering")
+
+
+def test_a_progress_callback_can_stop_a_streamed_call():
+    class Stop(Exception):
+        pass
+
+    events = [{"choices": [{"delta": {"content": "x"}}]}] * 5
+    llm = OpenAICompatibleLLM(
+        LLMConfig(base_url="http://x/v1", model="m", stream=True),
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=_sse(*events)))),
+    )
+
+    def stop(info):
+        raise Stop()
+
+    llm.on_progress = stop
+    import science_agent.llm as mod
+
+    ticks = iter(range(0, 100, 2))
+    orig = mod.time.monotonic
+    mod.time.monotonic = lambda: next(ticks)
+    try:
+        with pytest.raises(Stop):
+            llm.complete("s", "u")
+    finally:
+        mod.time.monotonic = orig
+
+
+def test_stream_errors_are_reported_like_normal_ones():
+    llm = OpenAICompatibleLLM(
+        LLMConfig(base_url="http://x/v1", model="m", stream=True),
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(401, text="bad key"))),
+    )
+    with pytest.raises(LLMError, match="401.*bad key"):
+        llm.complete("s", "u")
