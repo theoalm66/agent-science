@@ -113,3 +113,12 @@ def test_long_sources_reach_the_stages_that_check_them(offline_config, scripted)
     for stage in ("critic", "verdict"):
         assert "therefore C = 2 B log2(S/N)  <- wrong step" in prompts[stage]
         assert prompts[stage].count("detail") >= 500
+
+
+def test_papers_are_rendered_with_their_full_abstract():
+    from science_agent.pipeline import Pipeline
+    from science_agent.tools.literature import Paper
+
+    long_abstract = "word " * 400 + "END"
+    text = Pipeline._render_papers([Paper("T", "https://x", 2020, long_abstract.strip(), "arxiv"), Paper("N", "https://y", 2021, "", "s2")])
+    assert "END" in text and "(no abstract available)" in text

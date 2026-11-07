@@ -324,7 +324,7 @@ class Pipeline:
             return "(no search results)"
         lines = []
         for i, p in enumerate(papers[:15], 1):
-            lines.append(f"[{i}] {p.title} ({p.year or 'n.d.'}, {p.source}) {p.url}\n    {p.abstract[:400]}")
+            lines.append(f"[{i}] {p.title} ({p.year or 'n.d.'}, {p.source}) {p.url}\n    {p.abstract or '(no abstract available)'}")
         return "\n".join(lines)
 
     @staticmethod
