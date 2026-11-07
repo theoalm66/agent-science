@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet
 
+from science_agent.checkpoints import CheckpointStore
 from science_agent.config import STAGES
 from science_agent.tools.sandbox import RunResult
 from science_agent.profiles import Profile, ProfileStore
@@ -46,6 +47,7 @@ def make_server(root: Path, extra_config: str = ""):
         sandbox=lambda code, timeout: RunResult(True, "C 6.6e6\n", "", {"value": 6.6e6}),
         store=VersionStore(root / "data" / "versions.json", prompts, project),
         profiles=ProfileStore(root / "data" / "profiles", Fernet.generate_key()),
+        checkpoints=CheckpointStore(root / "data" / "checkpoints"),
     )
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     srv.seen_configs, srv.llm, srv.prompts_dir = seen_configs, llm, prompts
@@ -500,3 +502,38 @@ def test_runs_on_the_guests_own_api_do_not_wait_for_the_server_model(tmp_path):
         gate.set()
         srv.shutdown()
         srv.server_close()
+
+
+def test_an_interrupted_run_resumes_after_its_last_finished_stage(server):
+    from .conftest import CANNED
+
+    server.llm.responses["critic"] = ["not json", "still not json"]  # the critic stage fails
+    status, res = call(server, "POST", "/api/runs", {"idea": "A modulation that beats Shannon.", "llm": {"model": "m"}})
+    failed = wait_for_end(server, res["id"])
+    assert failed["status"] == "error" and failed["resumable"]
+    _, unfinished = call(server, "GET", "/api/unfinished")
+    assert [u["run_id"] for u in unfinished] == [res["id"]]
+    assert unfinished[0]["done"] == ["formalization", "literature", "limits", "computation"]
+
+    # The model is back: resuming skips everything that was done.
+    server.llm.responses["critic"] = CANNED["critic"]
+    server.llm.calls.clear()
+    status, again = call(server, "POST", "/api/runs", {"resume_from": res["id"], "llm": {"model": "m"}})
+    assert status == 200, again
+    snap = wait_for_end(server, again["id"])
+    assert snap["status"] == "done", snap["error"]
+    assert [stage for stage, _ in server.llm.calls] == ["critic", "verdict"]
+    resume_event = next(e for e in snap["events"] if e["kind"] == "resume")
+    assert resume_event["from_run"] == res["id"] and "limits" in resume_event["stages"]
+    assert snap["result"]["assessment"]["idea"] == "A modulation that beats Shannon."
+    assert snap["result"]["assessment"]["computation"]["ok"]
+    assert call(server, "GET", "/api/unfinished")[1] == []  # nothing left over
+
+
+def test_resuming_an_unknown_run_is_refused_and_discarding_works(server):
+    status, res = call(server, "POST", "/api/runs", {"resume_from": "abcdef123456", "llm": {"model": "m"}})
+    assert status == 400 and "no interrupted run" in res["error"].lower()
+    server.checkpoints.save("abcdef123456", "local", {"idea": "x", "clarifications": [], "assessment": {}})
+    assert len(call(server, "GET", "/api/unfinished")[1]) == 1
+    assert call(server, "POST", "/api/unfinished/discard", {"run_id": "abcdef123456"})[0] == 200
+    assert call(server, "GET", "/api/unfinished")[1] == []

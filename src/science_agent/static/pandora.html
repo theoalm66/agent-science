@@ -987,7 +987,8 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       "</div>" +
       (serverConfig.stages && Object.keys(serverConfig.stages).length ? '<p class="hint">Per-stage overrides from config.yaml also apply: '+esc(Object.keys(serverConfig.stages).map(function(s){ return s+" → "+(serverConfig.stages[s].model||"…"); }).join(", "))+"</p>" : "") +
       '<div class="flow-steps" id="stageList">'+(run ? renderStages() : "")+"</div>" +
-      '<div id="resultBox">'+(run ? renderResult() : "")+"</div>";
+      '<div id="resultBox">'+(run ? renderResult() : "")+"</div>" +
+      '<div id="unfinishedBox">'+renderUnfinished()+"</div>";
     ws.innerHTML = html;
 
     var idea = $("ideaInput");
@@ -1002,6 +1003,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     $("runBtn").addEventListener("click", function(){ startRun(); });
     if(run && run.result) wireClarify(run.result.assessment, run.id);
     if($("cancelBtn")) $("cancelBtn").addEventListener("click", cancelRun);
+    wireResume();
     var openBtn = $("openReportBtn");
     if(openBtn) openBtn.addEventListener("click", function(){ select("report", run.result.report); });
     var dlBtn = $("dlReportBtn");
@@ -1166,8 +1168,43 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     if($("answerRunBtn")) $("answerRunBtn").addEventListener("click", function(){ answerAndRerun(a, parentId); });
   }
 
+  // Unfinished runs: the finished stages are kept on the server, so a run can continue after an outage.
+  var unfinished = [];
+  var STAGE_NAMES = { formalization:"formalize", literature:"literature", limits:"limits", computation:"compute", critique:"critic" };
+  async function loadUnfinished(){
+    try{ unfinished = await api("GET", "/api/unfinished"); }catch(e){ unfinished = []; }
+    if($("unfinishedBox")){ $("unfinishedBox").innerHTML = renderUnfinished(); wireResume(); }
+  }
+  function renderUnfinished(){
+    var shown = unfinished.filter(function(u){ return !(run && run.status === "error" && run.resumable && run.id === u.run_id); });
+    if(!shown.length) return "";
+    return '<h3 style="margin-top:18px">Unfinished runs</h3><p class="hint">Their finished steps are saved. Resume continues with the next step instead of starting over.</p>' +
+      shown.map(function(u){
+        return '<div class="unfinished" style="border:1px solid var(--border,#888);border-radius:10px;padding:8px 10px;margin:6px 0">' +
+          "<div>"+esc(truncate(u.idea, 160))+"</div>" +
+          '<div class="hint">done: '+(u.done.length ? esc(u.done.map(function(k){ return STAGE_NAMES[k] || k; }).join(", ")) : "nothing yet")+
+            (u.error ? " · stopped: "+esc(truncate(u.error, 120)) : "")+"</div>" +
+          '<div class="ws-actions"><button class="btn small" type="button" data-resume="'+esc(u.run_id)+'">Resume</button>' +
+          '<button class="btn secondary small" type="button" data-discard="'+esc(u.run_id)+'">Discard</button></div></div>';
+      }).join("");
+  }
+  function wireResume(){
+    document.querySelectorAll("[data-resume]").forEach(function(b){
+      b.addEventListener("click", function(){ startRun({ resume_from: b.dataset.resume }); });
+    });
+    document.querySelectorAll("[data-discard]").forEach(function(b){
+      b.addEventListener("click", async function(){
+        if(!confirm("Discard the saved steps of this run? It cannot be resumed afterwards.")) return;
+        try{ await api("POST", "/api/unfinished/discard", { run_id: b.dataset.discard }); }catch(e){ flashNote(e.message, true); }
+        loadUnfinished();
+      });
+    });
+  }
+
   function renderResult(){
-    if(run.status === "error") return '<div class="error-box">Run failed: '+esc(run.error || "unknown error")+"\n\nSee the agent trace below for details.</div>";
+    if(run.status === "error") return '<div class="error-box">Run failed: '+esc(run.error || "unknown error")+"\n\nSee the agent trace below for details.</div>" +
+      (run.resumable ? '<div class="ws-actions" style="margin-top:10px"><button class="btn" type="button" data-resume="'+esc(run.id)+'">Resume where it stopped</button>' +
+        '<span class="hint">The steps that finished are saved; they are not repeated.</span></div>' : "");
     if(run.status === "cancelled") return '<div class="error-box">Run cancelled.</div>';
     if(run.status !== "done" || !run.result) return "";
     var a = run.result.assessment;
@@ -1196,7 +1233,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
     opts = opts || {};
     if(opts.idea){ runForm.idea = opts.idea; store("pandora_draft", runForm.idea); }
     var idea = (runForm.idea || "").trim();
-    if(!idea){ $("ideaInput").focus(); return; }
+    if(!idea && !opts.resume_from){ $("ideaInput").focus(); return; }
     if(!isGuest() && !settings.model){ openSettings(true); flashNote("Choose a model first", true); return; }
     if(isGuest() && guest.source === "own" && !guest.profile){ openSettings(true); gNote("Save your API settings first", true); return; }
     clearTrace();
@@ -1205,7 +1242,8 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
         idea: idea, llm: isGuest() ? undefined : llmPayload(), s2_api_key: isGuest() ? undefined : settings.s2_api_key,
         llm_source: isGuest() ? guest.source : undefined,
         domain: runForm.domain, literature: runForm.literature, compute: runForm.compute,
-        clarifications: opts.clarifications || [], parent_run: opts.parent_run || null
+        clarifications: opts.clarifications || [], parent_run: opts.parent_run || null,
+        resume_from: opts.resume_from || undefined
       });
       answerDraft = {};
       run = { id: res.id, status:"running", events:[], result:null, error:null };
@@ -1238,6 +1276,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
       var snap = await api("GET", "/api/runs/"+run.id+"?since="+run.events.length);
       snap.events.forEach(function(e){ run.events.push(e); addTrace(e); });
       run.result = snap.result; run.error = snap.error; run.queue_position = snap.queue_position;
+      run.resumable = snap.resumable;
       var ended = run.events.some(function(e){ return e.kind === "end"; });
       run.status = ended ? snap.status : "running";
       if(run.status === "running") setStatus("live", run.queue_position ? "queued · position "+run.queue_position
@@ -1246,7 +1285,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
         clearInterval(pollTimer); clearInterval(tickTimer);
         if(run.status === "done") setStatus("ok", "done · "+(run.result && run.result.assessment.verdict ? run.result.assessment.verdict.verdict : ""));
         else setStatus("err", run.status === "cancelled" ? "cancelled" : "run failed");
-        await loadReports();
+        await Promise.all([loadReports(), loadUnfinished()]);
         renderRack();
       }
       refreshRunView();
@@ -1727,6 +1766,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
         break;
       case "log": cls = "err"; text = e.level.toLowerCase()+": "+truncate(e.message, 160); detail = e.message.length > 160 ? e.message : null; break;
       case "error": cls = "err"; text = "error: "+e.message; detail = e.traceback || null; break;
+      case "resume": cls = "now"; text = "resuming run "+e.from_run+": "+(e.stages.length ? e.stages.join(", ")+" already done" : "nothing done yet")+(e.prompts_changed ? " (prompts changed since)" : ""); break;
       case "end": cls = e.status === "done" ? "now" : "err"; text = "Run "+(e.status === "done" ? "finished" : e.status); break;
       default: text = e.kind;
     }
@@ -1771,7 +1811,7 @@ pre.diff .skip{color:var(--fg-dim);font-style:italic}
   async function init(){
     addTrace({ kind:"info", t: Date.now()/1000, message:"Ready. Pick “Assess an idea” on the left, or browse the prompts, knowledge base and skills." });
     try{
-      var results = await Promise.all([api("GET", "/api/config"), api("GET", "/api/library"), loadReports(), api("GET", "/api/runs/current")]);
+      var results = await Promise.all([api("GET", "/api/config"), api("GET", "/api/library"), loadReports(), api("GET", "/api/runs/current"), loadUnfinished()]);
       serverConfig = results[0]; lib = results[1];
       if(!settings) settings = settingsFromConfig(serverConfig);
       settings.keys = settings.keys || {};

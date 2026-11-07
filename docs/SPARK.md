@@ -185,6 +185,23 @@ zwischen „Server model“ und „My own API“.
   Wartezeit pro Aufruf. Das Servermodell, seine Schlüssel und seine Stufen-Einstellungen aus
   `config.yaml` werden für Läufe auf der eigenen API nie benutzt.
 
+## Abgebrochene Läufe fortsetzen
+
+Nach jedem fertigen Schritt (Formalize, Literatursuche, Literature, Limits, Compute, Critic) speichert
+Pandora den Zwischenstand in `/data/pandora-data/checkpoints/` (Docker-Volume, übersteht also auch
+einen Neustart des Containers). Bricht ein Lauf ab, zum Beispiel weil das WLAN der Spark ausfällt
+oder das Modell nicht antwortet, bleiben die fertigen Schritte erhalten:
+
+- Im Lauf erscheint **„Resume where it stopped“**. Er macht beim fehlgeschlagenen Schritt weiter.
+- Nach einem Neustart oder Seitenwechsel steht der Lauf unter **„Unfinished runs“** mit
+  **Resume** und **Discard**.
+- Ein fortgesetzter Lauf bekommt eine neue Lauf-Nummer. Im Verlauf steht, welche Schritte
+  übernommen wurden. Wurden die Prompts inzwischen geändert, steht dort ein Hinweis.
+- Ein erfolgreicher Lauf löscht seinen Zwischenstand. Nicht fortgesetzte Zwischenstände
+  werden nach 14 Tagen gelöscht. Jeder sieht nur seine eigenen (der Admin alle).
+- In den Zwischenständen stehen die Idee, deine Antworten und die Ergebnisse der Schritte,
+  aber nie API-Schlüssel.
+
 ## Betrieb
 
 | Aufgabe | Befehl |

@@ -122,3 +122,27 @@ def test_papers_are_rendered_with_their_full_abstract():
     long_abstract = "word " * 400 + "END"
     text = Pipeline._render_papers([Paper("T", "https://x", 2020, long_abstract.strip(), "arxiv"), Paper("N", "https://y", 2021, "", "s2")])
     assert "END" in text and "(no abstract available)" in text
+
+
+def test_resume_skips_finished_stages_and_checkpoints_every_stage(offline_config):
+    class Failing(ScriptedLLM):
+        def complete(self, system, user):
+            if "# Stage: critic" in user:
+                raise RuntimeError("network down")
+            return super().complete(system, user)
+
+    saved = []
+    with pytest.raises(RuntimeError):
+        Pipeline(offline_config, llms={s: Failing() for s in STAGES}).run(
+            "idea", checkpoint=lambda a: saved.append(json.loads(json.dumps(a.to_dict()))))
+    assert len(saved) == 4  # formalize, literature, limits, compute
+    from science_agent.pipeline import Assessment
+
+    partial = Assessment.from_dict(saved[-1])
+    assert partial.done_stages() == ["formalize", "literature", "limits", "compute"]
+
+    llm = ScriptedLLM()
+    a = Pipeline(offline_config, llms={s: llm for s in STAGES}).run("idea", resume=partial)
+    assert [stage for stage, _ in llm.calls] == ["critic", "verdict"]
+    assert a.verdict.verdict == "wrong" and a.computation.ok
+    assert a.seconds["formalize"] == partial.seconds["formalize"]

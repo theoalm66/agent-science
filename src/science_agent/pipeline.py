@@ -114,6 +114,37 @@ class Assessment:
         """The text the stages assess: the idea plus the author's answers, if any."""
         return compose_source(self.idea, self.clarifications)
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "Assessment":
+        """Rebuild a (possibly partial) assessment from `to_dict()` output, e.g. a checkpoint."""
+        def load(model, key):
+            return model.model_validate(d[key]) if d.get(key) else None
+
+        return cls(
+            idea=d["idea"],
+            domain=d.get("domain", ""),
+            started_at=d.get("started_at", ""),
+            formalization=load(Formalization, "formalization"),
+            papers=[Paper(**p) for p in d.get("papers") or []],
+            literature=load(LiteratureAssessment, "literature"),
+            limits=load(LimitsCheck, "limits"),
+            computation=load(Computation, "computation"),
+            critique=load(Critique, "critique"),
+            verdict=load(VerdictResult, "verdict"),
+            models=dict(d.get("models") or {}),
+            seconds=dict(d.get("seconds") or {}),
+            meta=dict(d.get("meta") or {}),
+            clarifications=list(d.get("clarifications") or []),
+        )
+
+    def done_stages(self) -> list[str]:
+        """Stages whose result is present, in pipeline order."""
+        present = {
+            "formalize": self.formalization, "literature": self.literature, "limits": self.limits,
+            "compute": self.computation, "critic": self.critique, "verdict": self.verdict,
+        }
+        return [name for name, value in present.items() if value is not None]
+
     def to_dict(self) -> dict:
         def dump(m):
             return m.model_dump() if m is not None else None
@@ -211,17 +242,32 @@ class Pipeline:
 
     # -- stages ------------------------------------------------------------
 
-    def run(self, idea: str, clarifications: list[dict] | None = None) -> Assessment:
-        a = Assessment(
-            idea=idea.strip(),
-            domain=self.domain.get("domain", self.config.domain),
-            started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            clarifications=normalize_clarifications(clarifications),
-        )
+    def run(
+        self,
+        idea: str,
+        clarifications: list[dict] | None = None,
+        resume: Assessment | None = None,
+        checkpoint: Callable[[Assessment], None] | None = None,
+    ) -> Assessment:
+        """Run all stages. `checkpoint(assessment)` is called after every finished stage; passing
+        the partial assessment of an interrupted run as `resume` continues after its last stage."""
+        if resume is not None:
+            a = resume
+            a.verdict = None  # the verdict is always produced by this run
+        else:
+            a = Assessment(
+                idea=idea.strip(),
+                domain=self.domain.get("domain", self.config.domain),
+                started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                clarifications=normalize_clarifications(clarifications),
+            )
         check_idea_length(a.source, self.config.max_idea_chars)
-        a.formalization = self._timed(a, "formalize", lambda: self.ask(
-            "formalize", Formalization, idea=a.source, knowledge_index=knowledge.render_index(self.domain)
-        ))
+        save = checkpoint or (lambda assessment: None)
+        if a.formalization is None:
+            a.formalization = self._timed(a, "formalize", lambda: self.ask(
+                "formalize", Formalization, idea=a.source, knowledge_index=knowledge.render_index(self.domain)
+            ))
+            save(a)
         f = a.formalization
         if f.underspecified:
             # Stop instead of guessing the author's setup, but still give the established view
@@ -242,39 +288,47 @@ class Pipeline:
             )
             return a
 
-        if self.literature_search and f.search_queries:
-            self.progress("search")
-            a.papers = self.literature_search.search(f.search_queries[:5])
-        a.literature = self._timed(a, "literature", lambda: self.ask(
-            "literature",
-            LiteratureAssessment,
-            claim=f.claim,
-            standard_terms=", ".join(f.standard_terms) or "(none given)",
-            papers=self._render_papers(a.papers),
-        ))
+        if a.literature is None:
+            if self.literature_search and f.search_queries and not a.papers:
+                self.progress("search")
+                a.papers = self.literature_search.search(f.search_queries[:5])
+                save(a)  # the search is the slow, rate-limited part: keep its result
+            a.literature = self._timed(a, "literature", lambda: self.ask(
+                "literature",
+                LiteratureAssessment,
+                claim=f.claim,
+                standard_terms=", ".join(f.standard_terms) or "(none given)",
+                papers=self._render_papers(a.papers),
+            ))
+            save(a)
 
-        a.limits = self._timed(a, "limits", lambda: self.ask(
-            "limits",
-            LimitsCheck,
-            claim=f.claim,
-            assumptions="; ".join(f.assumptions) or "(none stated)",
-            predicted_quantity=f.predicted_quantity or "(not stated)",
-            key_content=_render_key_content(f),
-            knowledge=knowledge.render_full(self.domain),
-        ))
+        if a.limits is None:
+            a.limits = self._timed(a, "limits", lambda: self.ask(
+                "limits",
+                LimitsCheck,
+                claim=f.claim,
+                assumptions="; ".join(f.assumptions) or "(none stated)",
+                predicted_quantity=f.predicted_quantity or "(not stated)",
+                key_content=_render_key_content(f),
+                knowledge=knowledge.render_full(self.domain),
+            ))
+            save(a)
 
-        if self.config.compute.enabled and a.limits.quantitative_question:
+        if self.config.compute.enabled and a.limits.quantitative_question and a.computation is None:
             a.computation = self._timed(a, "compute", lambda: self._compute(f, a.limits))
+            save(a)
 
-        a.critique = self._timed(a, "critic", lambda: self.ask(
-            "critic",
-            Critique,
-            claim=f.claim,
-            original=a.source,
-            literature=_dump(a.literature),
-            limits=_dump(a.limits),
-            computation=self._render_computation(a.computation),
-        ))
+        if a.critique is None:
+            a.critique = self._timed(a, "critic", lambda: self.ask(
+                "critic",
+                Critique,
+                claim=f.claim,
+                original=a.source,
+                literature=_dump(a.literature),
+                limits=_dump(a.limits),
+                computation=self._render_computation(a.computation),
+            ))
+            save(a)
 
         a.verdict = self._timed(a, "verdict", lambda: self.ask(
             "verdict",

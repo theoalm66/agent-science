@@ -40,7 +40,8 @@ from .config import Config, LLMConfig, load_config
 from .jsonutil import JSONExtractionError, extract_json
 from .llm import LLM
 from .netguard import EndpointNotAllowed, check_public_endpoint, safe_client
-from .pipeline import Pipeline, check_idea_length, compose_source, normalize_clarifications
+from .checkpoints import CheckpointStore
+from .pipeline import Assessment, Pipeline, check_idea_length, compose_source, normalize_clarifications
 from .profiles import Profile, ProfileError, ProfileStore, clean_profile, load_master_key
 from .report import render_markdown, save
 from .tools.literature import LiteratureSearch
@@ -86,6 +87,8 @@ class Run:
         self.clarifications = clarifications or []
         self.parent_run = parent_run
         self.owner = owner
+        self.resumable = False  # an interim result is on disk, so "Resume" can skip the finished stages
+        self.resumed_from: str | None = None
         self.status = "queued"  # queued | running | done | error | cancelled
         self.queue_position: int | None = None
         self.lane = "local"  # "local": the server's own model (one at a time); "own": a guest's API
@@ -112,6 +115,7 @@ class Run:
             "events": events,
             "result": self.result if self.status == "done" else None,
             "error": self.error,
+            "resumable": self.resumable,
         }
 
 
@@ -302,12 +306,14 @@ class PandoraServer(ThreadingHTTPServer):
         literature_factory: Callable[[Config, str | None], LiteratureSearch] | None = None,
         store: VersionStore | None = None,
         profiles: ProfileStore | None = None,
+        checkpoints: CheckpointStore | None = None,
     ):
         super().__init__(address, Handler)
         self.config_path = config_path
         project = _project_dir()
         self.data_dir = Path(os.environ.get("PANDORA_DATA_DIR") or project / "pandora-data")
         self._profiles = profiles
+        self.checkpoints = checkpoints or CheckpointStore(self.data_dir / "checkpoints")
         if store is None:
             store = VersionStore(
                 self.data_dir / "versions.json",
@@ -425,6 +431,19 @@ class PandoraServer(ThreadingHTTPServer):
         return cfg, (profile.s2_api_key or s2_key), base_url
 
     def start_run(self, body: dict, user: User = LOCAL_USER) -> Run:
+        resume_from = str(body.get("resume_from") or "")
+        resume = None
+        if resume_from:
+            # Continue an interrupted run: idea, answers and finished stages come from its checkpoint.
+            resume = self.checkpoints.load(resume_from)
+            if resume is None or not self.can_see(user, resume.get("owner")):
+                raise ValueError("There is no interrupted run to resume")
+            with self.lock:
+                if any(r.status in ("queued", "running") and resume_from in (r.id, r.resumed_from)
+                       for r in self.runs.values()):
+                    raise ValueError("That run is already being resumed")
+            body = {**body, "idea": resume["idea"], "clarifications": resume.get("clarifications") or [],
+                    "parent_run": resume.get("parent_run")}
         idea = str(body.get("idea") or "").strip()
         if not idea:
             raise ValueError("The idea is empty")
@@ -450,12 +469,13 @@ class PandoraServer(ThreadingHTTPServer):
             if len(active) >= limit:
                 raise RuntimeError(f"You already have {len(active)} run(s) queued or running (limit {limit})")
             run = Run(idea, clarifications, parent_run, owner=user.login)
+            run.resumed_from = resume_from or None
             run.lane = "own" if own else "local"
             self.runs[run.id] = run
             finished = [k for k, r in self.runs.items() if r.status not in ("queued", "running")]
             for old in finished[: max(0, len(self.runs) - KEEP_RUNS)]:
                 del self.runs[old]
-            self.lanes[run.lane].append((run, (cfg, s2_key, prompts, prompt_versions)))
+            self.lanes[run.lane].append((run, (cfg, s2_key, prompts, prompt_versions, resume)))
             self._renumber_queue(run.lane)
             self.queue_ready.notify_all()
         run.emit(
@@ -466,6 +486,12 @@ class PandoraServer(ThreadingHTTPServer):
             domain=cfg.domain, literature=cfg.literature.enabled, compute=cfg.compute.enabled,
             prompt_versions=prompt_versions, queue_position=run.queue_position,
         )
+        if resume is not None:
+            stages = Assessment.from_dict(resume["assessment"]).done_stages() if resume.get("assessment") else []
+            run.emit(
+                "resume", from_run=resume_from, stages=stages,
+                prompts_changed=bool(resume.get("prompt_versions")) and resume.get("prompt_versions") != prompt_versions,
+            )
         return run
 
     def _renumber_queue(self, lane: str) -> None:
@@ -518,7 +544,20 @@ class PandoraServer(ThreadingHTTPServer):
             "llm_source": "own-api" if run.lane == "own" else "server",
         }
 
-    def _work(self, run: Run, cfg: Config, s2_key: str | None, prompts: dict, prompt_versions: dict) -> None:
+    def _checkpoint(self, run: Run, prompt_versions: dict, assessment: Assessment) -> None:
+        """Keep the finished stages on disk. Once the first checkpoint of a resumed run is written,
+        it contains everything the old one had, so the old file goes."""
+        self.checkpoints.save(run.id, run.owner, {
+            "idea": run.idea, "clarifications": run.clarifications, "parent_run": run.parent_run,
+            "prompt_versions": prompt_versions, "assessment": assessment.to_dict(),
+        })
+        run.resumable = True
+        if run.resumed_from:
+            self.checkpoints.delete(run.resumed_from)
+            run.resumed_from = None
+
+    def _work(self, run: Run, cfg: Config, s2_key: str | None, prompts: dict, prompt_versions: dict,
+              resume: dict | None = None) -> None:
         handler = _RunLogHandler(run, threading.get_ident())
         logging.getLogger().addHandler(handler)
         guard = None
@@ -552,9 +591,17 @@ class PandoraServer(ThreadingHTTPServer):
                 cfg, llms=llms, literature=literature, sandbox=sandbox,
                 progress=lambda stage: run.emit("stage", stage=stage), prompts=prompts,
             )
-            assessment = pipeline.run(run.idea, run.clarifications)
+            assessment = pipeline.run(
+                run.idea, run.clarifications,
+                resume=Assessment.from_dict(resume["assessment"]) if resume and resume.get("assessment") else None,
+                checkpoint=lambda a: self._checkpoint(run, prompt_versions, a),
+            )
             assessment.meta = self.run_meta(run, cfg, prompt_versions)
             path = save(assessment, cfg.output_dir)
+            self.checkpoints.delete(run.id)
+            if run.resumed_from:
+                self.checkpoints.delete(run.resumed_from)
+            run.resumable = False
             run.result = {
                 "assessment": assessment.to_dict(),
                 "markdown": render_markdown(assessment),
@@ -567,6 +614,8 @@ class PandoraServer(ThreadingHTTPServer):
             run.error = f"{type(e).__name__}: {e}"
             run.emit("error", message=run.error, traceback=traceback.format_exc()[-4000:])
             run.status = "error"
+            self.checkpoints.set_error(run.id, run.error)
+            run.resumable = self.checkpoints.exists(run.id)
         finally:
             logging.getLogger().removeHandler(handler)
             if guard is not None:
@@ -694,6 +743,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"run": run.snapshot() if run else None})
             if parts == ["api", "profile"]:
                 return self._profile_get()
+            if parts == ["api", "unfinished"]:
+                return self._json(self.server.checkpoints.list(lambda owner: self.server.can_see(self.user, owner)))
             if len(parts) == 3 and parts[:2] == ["api", "runs"]:
                 run = self._visible_run(parts[2])
                 if not run:
@@ -732,6 +783,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._profile_save(body)
             if parts == ["api", "profile", "delete"]:
                 return self._profile_delete()
+            if parts == ["api", "unfinished", "discard"]:
+                data = self.server.checkpoints.load(str(body.get("run_id") or ""))
+                if data is None or not self.server.can_see(self.user, data.get("owner")):
+                    return self._error(404, "Unknown interrupted run")
+                self.server.checkpoints.delete(data["run_id"])
+                return self._json({"ok": True})
             if parts == ["api", "models"]:
                 return self._models(body)
             if len(parts) == 3 and parts[:2] == ["api", "versions"]:
