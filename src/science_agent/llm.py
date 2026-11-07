@@ -105,6 +105,13 @@ class OpenAICompatibleLLM:
                 url, body = self.cfg.base_url.rstrip("/") + "/chat/completions", self._body(system, user)
             try:
                 resp = self.client.post(url, json=body, headers=self.headers)
+            except httpx.ReadTimeout as e:
+                # The server took the request but did not answer in time (usually a reasoning model
+                # still thinking). Asking again would only queue the same long job a second time.
+                raise LLMError(
+                    f"{self.cfg.model} gave no answer within {self.cfg.timeout:.0f} s ({url}). Not retried: "
+                    "the model is probably still generating. Lower max_tokens or raise the timeout for this stage."
+                ) from e
             except httpx.TransportError as e:
                 if attempt == self.max_retries:
                     raise LLMError(f"Cannot reach {url}: {e}") from e

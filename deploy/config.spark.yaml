@@ -10,6 +10,14 @@ llm:
   max_tokens: 24576   # reasoning models count their thinking; 8192 ran out in the compute stage
   timeout: 900
 
+# Optional: give one stage its own limits. The compute prompt is long and a reasoning model can
+# think for a quarter of an hour before it writes the script; a shorter limit makes a stuck
+# call fail fast, and "Resume" then continues from the saved steps.
+# stages:
+#   compute:
+#     max_tokens: 12000
+#     timeout: 420
+
 literature:
   enabled: true
   max_results: 5

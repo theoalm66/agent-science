@@ -224,3 +224,28 @@ def test_server_setting_at_the_top_level_is_reported(tmp_path):
     path.write_text('server:\n  mode: shared\nguest_allowed_hosts:\n  - "10.0.0.1:8008"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="guest_allowed_hosts.*under 'server:'"):
         load_config(path)
+
+
+def test_a_read_timeout_is_not_retried_but_connection_errors_are(monkeypatch):
+    monkeypatch.setattr("science_agent.llm.time.sleep", lambda s: None)
+    calls = []
+
+    def slow(request):
+        calls.append(1)
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    llm = OpenAICompatibleLLM(LLMConfig(base_url="http://x/v1", model="m"), client=httpx.Client(transport=httpx.MockTransport(slow)))
+    with pytest.raises(LLMError, match="no answer within.*Not retried"):
+        llm.complete("s", "u")
+    assert len(calls) == 1
+
+    calls.clear()
+
+    def down(request):
+        calls.append(1)
+        raise httpx.ConnectError("refused", request=request)
+
+    llm = OpenAICompatibleLLM(LLMConfig(base_url="http://x/v1", model="m"), client=httpx.Client(transport=httpx.MockTransport(down)))
+    with pytest.raises(LLMError, match="Cannot reach"):
+        llm.complete("s", "u")
+    assert len(calls) == 4  # the first try plus three retries
